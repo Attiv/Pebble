@@ -65,6 +65,19 @@ describe("ContactAddressAction", () => {
     useUIStore.setState({ activeView: "inbox", pendingContactId: null });
   });
 
+  it("does not map the original participant to a contact saved with another address", async () => {
+    mocks.save.mockResolvedValue({ ...alice, display_name: "Bob", emails: [{ ...alice.emails[0], address: "bob@example.com" }] });
+    renderAction(<ContactAddressAction accountId="account-1" name="Alice" address="alice@example.com" />);
+    const addButton = await screen.findByRole("button", { name: "Add alice@example.com to contacts" });
+    await waitFor(() => expect((addButton as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(addButton);
+    fireEvent.change(screen.getByLabelText("Email address"), { target: { value: "bob@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save contact" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByRole("button", { name: "View Bob in contacts" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Add alice@example.com to contacts" })).toBeTruthy();
+  });
+
   it("opens a prefilled editor for an unsaved participant", async () => {
     renderAction(
       <ContactAddressAction

@@ -44,6 +44,8 @@ fn unescape_value(value: &str) -> String {
 
 fn escape_value(value: &str) -> String {
     value
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
         .replace('\\', "\\\\")
         .replace('\n', "\\n")
         .replace(';', "\\;")
@@ -271,7 +273,7 @@ fn parse_vcards(data: &str) -> Result<Vec<std::result::Result<ContactInput, Stri
     for raw_line in normalized.lines() {
         if raw_line.starts_with([' ', '\t']) {
             if let Some(previous) = unfolded.last_mut() {
-                previous.push_str(raw_line.trim_start_matches([' ', '\t']));
+                previous.push_str(&raw_line[1..]);
             }
         } else {
             unfolded.push(raw_line.to_string());
@@ -572,6 +574,51 @@ mod tests {
                 label: ContactEmailLabel::Other,
                 is_primary: true,
             }],
+        }
+    }
+
+    #[test]
+    fn export_import_preserves_whitespace_at_fold_boundaries() {
+        for whitespace in [" ", "\t", "  "] {
+            let source = Store::open_in_memory().unwrap();
+            let mut input = contact_input("fold@example.com");
+            input.display_name = format!("{}{whitespace}B", "A".repeat(72));
+            input.notes = format!("{}{whitespace}B", "N".repeat(70));
+            source.save_contact(&input).unwrap();
+            let destination = Store::open_in_memory().unwrap();
+            destination
+                .import_contacts_vcard(&source.export_contacts_vcard().unwrap())
+                .unwrap();
+            let restored = destination
+                .list_contacts(None, false, 10, 0)
+                .unwrap()
+                .remove(0);
+            assert_eq!(restored.display_name, input.display_name);
+            assert_eq!(restored.notes, input.notes);
+        }
+    }
+
+    #[test]
+    fn export_normalizes_carriage_returns_without_injecting_properties() {
+        for line_break in ["\r", "\r\n", "\n"] {
+            let source = Store::open_in_memory().unwrap();
+            let mut input = contact_input("original@example.com");
+            input.notes = format!("Hello{line_break}EMAIL:injected@example.com");
+            source.save_contact(&input).unwrap();
+            let destination = Store::open_in_memory().unwrap();
+            destination
+                .import_contacts_vcard(&source.export_contacts_vcard().unwrap())
+                .unwrap();
+            let restored = destination
+                .list_contacts(None, false, 10, 0)
+                .unwrap()
+                .remove(0);
+            assert_eq!(
+                restored.emails.len(),
+                1,
+                "Text must not become another vCard property"
+            );
+            assert_eq!(restored.notes, "Hello\nEMAIL:injected@example.com");
         }
     }
 

@@ -188,7 +188,23 @@ describe("ContactAutocomplete", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("lets Tab leave a recent suggestion without committing it", async () => {
+  it("keeps the option mounted through pointer focus handling before selection", async () => {
+    searchContactSuggestionsMock.mockResolvedValue([suggestion({ name: "Alice", address: "alice@example.com" })]);
+    const onChange = vi.fn();
+    render(<ContactAutocomplete value={[]} onChange={onChange} accountId="account-1" />);
+    const input = screen.getByRole("combobox");
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "alice" } });
+    const option = await screen.findByRole("option");
+    // Model the browser's default blur when clicking a non-focusable option.
+    if (fireEvent.mouseDown(option)) act(() => input.blur());
+    expect(option.isConnected).toBe(true);
+    fireEvent.mouseUp(option);
+    fireEvent.click(option);
+    expect(onChange).toHaveBeenCalledWith(["alice@example.com"]);
+  });
+
+  it("keeps recent removal reachable by Tab and closes only when focus leaves", async () => {
     searchContactSuggestionsMock.mockResolvedValue([
       suggestion({ name: "Alex", address: "alex@example.com", last_interaction_at: 100 }),
     ]);
@@ -202,7 +218,12 @@ describe("ContactAutocomplete", () => {
 
     expect(removeButton.closest('[role="option"]')).toBeNull();
     expect(fireEvent.keyDown(input, { key: "Tab" })).toBe(true);
-    expect(input.getAttribute("aria-expanded")).toBe("false");
+    expect(removeButton.isConnected).toBe(true);
+    act(() => removeButton.focus());
+    expect(document.activeElement).toBe(removeButton);
+    expect(input.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.blur(removeButton, { relatedTarget: document.body });
+    expect(screen.queryByRole("button", { name: "Remove suggestion alex@example.com" })).toBeNull();
   });
 
   it("ignores an older search response that resolves after the latest query", async () => {

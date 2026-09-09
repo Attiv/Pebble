@@ -255,7 +255,7 @@
     "lastBackup": "上次备份",
     "backupSuccess": "设置备份已完成",
     "restoreSuccess": "备份已恢复，请重新连接邮箱账户和翻译提供方后再继续使用。",
-    "restoreSuccessWithSecrets": "备份已恢复，并已恢复邮箱密码、OAuth tokens 和 API keys。",
+    "restoreSuccessWithSecrets": "备份及可恢复的凭据已恢复。已有 OAuth 连接和包含本地邮件数据的邮箱保持不变。",
     "restoreConfirm": "这会用备份替换本地的规则、看板卡片/备注和联系人，合并账户元数据，并在存在时恢复加密 secrets。是否继续？",
     "backupFailed": "备份失败：{{error}}",
     "restoreFailed": "恢复失败：{{error}}",

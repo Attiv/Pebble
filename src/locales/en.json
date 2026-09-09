@@ -255,7 +255,7 @@
     "lastBackup": "Last backup",
     "backupSuccess": "Settings backup completed successfully",
     "restoreSuccess": "Backup restored. Reconnect email accounts and translation providers to continue.",
-    "restoreSuccessWithSecrets": "Backup restored with account passwords, OAuth tokens, and API keys.",
+    "restoreSuccessWithSecrets": "Backup restored with saved credentials. Existing OAuth connections and mailboxes with local data were preserved.",
     "restoreConfirm": "This will replace local rules, Kanban cards/notes, and contacts; merge account metadata; and restore encrypted secrets when present. Continue?",
     "backupFailed": "Backup failed: {{error}}",
     "restoreFailed": "Restore failed: {{error}}",

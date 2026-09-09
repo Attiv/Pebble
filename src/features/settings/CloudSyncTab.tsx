@@ -331,7 +331,7 @@ export default function CloudSyncTab() {
         request.preview.has_encrypted_secrets
           ? t(
               "cloudSync.restoreSuccessWithSecrets",
-              "Backup restored with account passwords, OAuth tokens, and API keys.",
+              "Backup restored with saved credentials. Existing OAuth connections and mailboxes with local data were preserved.",
             )
           : t("cloudSync.restoreSuccess"),
       );

@@ -638,10 +638,19 @@ async fn replay_remote_send(
                 ReplayPendingMailOpError::Retryable(error)
             }
         })?;
-    if matches!(
-        account.provider,
-        ProviderType::Gmail | ProviderType::Outlook
-    ) && !outgoing
+    replay_prepared_send(&outgoing, &verified_from, || transport.send(&outgoing)).await
+}
+
+async fn replay_prepared_send<F, Fut>(
+    outgoing: &pebble_core::traits::OutgoingMessage,
+    verified_from: &pebble_core::EmailAddress,
+    send: F,
+) -> std::result::Result<(), ReplayPendingMailOpError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = std::result::Result<(), PebbleError>>,
+{
+    if !outgoing
         .from
         .address
         .eq_ignore_ascii_case(&verified_from.address)
@@ -650,7 +659,7 @@ async fn replay_remote_send(
             "The queued message belongs to a different mailbox. Review it and compose a new message if needed.".into(),
         )));
     }
-    classify_remote_send_call(transport.send(&outgoing).await)
+    classify_remote_send_call(send().await)
 }
 
 fn apply_pending_local_commit(
@@ -866,6 +875,58 @@ mod tests {
     use crate::commands::messages::classify_remote_delete_result;
     use pebble_core::*;
     use pebble_store::Store;
+
+    #[tokio::test]
+    async fn queued_send_stops_before_dispatch_after_mailbox_address_changes() {
+        for provider in [ProviderType::Imap, ProviderType::Pop3] {
+            let store = Store::open_in_memory().unwrap();
+            let mut account = test_account();
+            account.provider = provider;
+            store.insert_account(&account).unwrap();
+            let mut message = test_message(&account.id);
+            message.from_address = account.email.clone();
+            message.from_name = "Original sender".into();
+            store.insert_message(&message, &[]).unwrap();
+            store
+                .update_account_details(&account.id, "other@example.com", "New sender", None, None)
+                .unwrap();
+            let changed = store.get_account(&account.id).unwrap().unwrap();
+            let stored = store.get_message(&message.id).unwrap().unwrap();
+            let outgoing = compose::outgoing_message_from_stored(&stored, vec![]);
+            let calls = std::cell::Cell::new(0);
+            let result =
+                super::replay_prepared_send(&outgoing, &changed.sender_identity(), || async {
+                    calls.set(calls.get() + 1);
+                    Ok(())
+                })
+                .await;
+            assert!(matches!(
+                result,
+                Err(ReplayPendingMailOpError::SenderIdentityBlocked(_))
+            ));
+            assert_eq!(calls.get(), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn queued_send_keeps_original_name_when_only_name_changes() {
+        let mut account = test_account();
+        account.provider = ProviderType::Imap;
+        let mut message = test_message(&account.id);
+        message.from_address = account.email.to_uppercase();
+        message.from_name = "Original sender".into();
+        account.display_name = "New sender".into();
+        let outgoing = compose::outgoing_message_from_stored(&message, vec![]);
+        let calls = std::cell::Cell::new(0);
+        super::replay_prepared_send(&outgoing, &account.sender_identity(), || async {
+            calls.set(calls.get() + 1);
+            assert_eq!(outgoing.from.name.as_deref(), Some("Original sender"));
+            Ok(())
+        })
+        .await
+        .unwrap();
+        assert_eq!(calls.get(), 1);
+    }
 
     fn test_account() -> Account {
         let now = now_timestamp();

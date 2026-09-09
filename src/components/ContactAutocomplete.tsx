@@ -209,10 +209,7 @@ export default function ContactAutocomplete({
           ? (activeSuggestion?.source === "recent" ? activeSuggestion : undefined)
           : suggestions.find((suggestion) => suggestion.source === "recent");
         if (e.key === "Tab" && showDropdown && removableSuggestion) {
-          // Keep the recent-only removal control from being converted into a chip,
-          // while deliberately leaving Tab uncancelled so focus advances normally.
-          setShowDropdown(false);
-          setActiveIndex(-1);
+          // Keep the removal button mounted while native Tab moves focus to it.
           return;
         }
         e.preventDefault();
@@ -273,7 +270,13 @@ export default function ContactAutocomplete({
     : suggestions.find((suggestion) => suggestion.source === "recent");
 
   return (
-    <div ref={containerRef} style={{ position: "relative", flex: 1 }}>
+    <div ref={containerRef} style={{ position: "relative", flex: 1 }}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setShowDropdown(false);
+          setActiveIndex(-1);
+        }
+      }}>
         <div
           className="scroll-region contact-autocomplete-scroll"
           style={{
@@ -404,6 +407,7 @@ export default function ContactAutocomplete({
                 id={`${instanceId}-option-${idx}`}
                 aria-label={`${contact.name ?? contact.address} ${contact.address}`}
                 aria-selected={idx === activeIndex}
+                onMouseDown={(event) => event.preventDefault()}
                 onClick={() => selectContact(contact)}
                 onMouseEnter={() => setActiveIndex(idx)}
                 style={{

@@ -52,7 +52,13 @@ export default function ContactAddressAction({
 
   const handleSave = async (input: ContactInput) => {
     const saved = await save.mutateAsync(input);
-    queryClient.setQueryData(contactByAddressQueryKey(normalizedAddress), saved);
+    const retainsOriginalAddress = saved.emails.some((email) => (
+      email.address.trim().toLowerCase() === normalizedAddress
+    ));
+    queryClient.setQueryData(contactByAddressQueryKey(normalizedAddress), retainsOriginalAddress ? saved : null);
+    for (const email of saved.emails) {
+      queryClient.setQueryData(contactByAddressQueryKey(email.address), saved);
+    }
     setEditorOpen(false);
     addToast({ message: t("contacts.saveSuccess", "Contact saved"), type: "success" });
   };

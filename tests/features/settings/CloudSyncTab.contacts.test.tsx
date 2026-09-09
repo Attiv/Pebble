@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -38,6 +38,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 import CloudSyncTab from "@/features/settings/CloudSyncTab";
+import { restoreFromWebdav } from "@/lib/api";
 
 describe("CloudSyncTab contact backups", () => {
   beforeEach(() => {
@@ -65,5 +66,17 @@ describe("CloudSyncTab contact backups", () => {
     fireEvent.click(screen.getByRole("button", { name: "Restore Settings Backup" }));
 
     expect(await screen.findByText(/Contacts: 7/)).toBeTruthy();
+  });
+
+  it("explains that existing OAuth connections are preserved after private restore", async () => {
+    const preview = await mocks.previewWebdavBackup();
+    mocks.previewWebdavBackup.mockResolvedValue({ ...preview, has_encrypted_secrets: true, secret_account_count: 1 });
+    vi.mocked(restoreFromWebdav).mockResolvedValue("Restored");
+    render(<CloudSyncTab />);
+    fireEvent.change(screen.getByPlaceholderText("Required for backing up or restoring secrets"), { target: { value: "test-passphrase" } });
+    fireEvent.click(screen.getByRole("button", { name: "Restore Settings Backup" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm" }));
+    expect(await screen.findByText(/Existing OAuth connections and mailboxes with local data were preserved/)).toBeTruthy();
   });
 });
