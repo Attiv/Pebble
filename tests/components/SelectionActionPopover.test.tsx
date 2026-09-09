@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SelectionActionPopover from "../../src/components/SelectionActionPopover";
 
@@ -9,6 +9,18 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("SelectionActionPopover", () => {
+  it("clears the copied feedback timer when unmounted", async () => {
+    vi.useFakeTimers();
+    try {
+      const view = render(<SelectionActionPopover text="test" position={{ x: 0, y: 0 }}
+        onTranslate={vi.fn()} onSearch={vi.fn()} onCreateRule={vi.fn()}
+        onAddToKanbanNote={vi.fn()} onClose={vi.fn()} />);
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Copy selected text" })); });
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+      view.unmount();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
   beforeEach(() => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -36,7 +48,7 @@ describe("SelectionActionPopover", () => {
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith("selected email text");
     });
-    expect(screen.getByRole("button", { name: "Copied selected text" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Copied selected text" })).toBeTruthy();
   });
 
   it("keeps translate behind the secondary actions menu", () => {
