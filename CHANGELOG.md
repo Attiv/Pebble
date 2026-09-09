@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-09-09
+
 ### Added
 
 - Added independent local account labels, visible alongside mailbox addresses, with v3 backup support and imports from v1/v2 backups (#79).
@@ -14,7 +16,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added a local address book with searchable contacts, multiple labeled email addresses, favorites, notes, and quick create/edit actions from message participants (#81).
 - Added recipient suggestions that prioritize saved contacts while retaining recent correspondents, with controls to suppress unwanted recent addresses (#81).
 - Added standards-compatible vCard import and export with duplicate merging, partial-error reporting, UTF-8/folded-line support, and safe file/card limits (#81).
-- Added contacts to local file and WebDAV settings backups using the backward-compatible v2 backup schema (#81).
+- Added contacts to local file and WebDAV settings backups, with backward-compatible imports (#81).
 
 ### Fixed
 
@@ -23,6 +25,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Outlook now clearly shows its provider-managed sender name; changing a local label does not change the external identity. New OAuth accounts bind to a verified provider identity, and OAuth addresses cannot be changed through ordinary account editing (#77, #79).
 - Settings restore preserves existing OAuth mailbox addresses and connected credentials instead of silently replacing them with another mailbox from a backup.
 - Fixed copied-text feedback leaving a timer running after its popover was closed.
+- Fixed vCard export/import losing whitespace at folded boundaries and treating carriage returns inside notes as new contact properties.
+- Fixed participant actions associating a newly saved contact with an email address removed in the editor; recent-suggestion removal is now reachable by keyboard.
+- Blocked queued SMTP sends after the account mailbox address changes, while retaining frozen names when only a name changes.
+- OAuth remote drafts now use the same verified identity and connection as sending. Failed identity checks preserve encrypted local drafts without uploading them.
+- Corrected backup restore feedback to explain that existing OAuth connections and mailboxes with local data are preserved.
 
 ### Upgrade notes
 
@@ -30,6 +37,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Queued messages retain their original identity. Messages with missing or incompatible identities stop automatic retries and remain visible for review; unknown send outcomes are never automatically resent.
 - Outlook sender names remain controlled by the mailbox service. This change does not enable aliases or delegated sending, and recipient address books may affect how names appear.
 - New backups use schema v3. Upgrade other clients before importing them. Existing OAuth connections are preserved during restore; a new account can still restore its saved credentials. Settings backups do not include message bodies or attachments.
+- Automated tests and package builds cover client behavior. Live SMTP/Gmail/Outlook recipient-side delivery has not been exercised for this release; provider rewriting and recipient address-book display remain outside the client guarantees. Verify your sender name with a test message before formal use.
 
 ## [0.1.4] - 2026-08-08
 
@@ -326,7 +334,8 @@ This release includes:
 - Windows installers are not code-signed yet, so Windows SmartScreen may show a warning.
 - Outlook support is still experimental and depends on Microsoft Graph permissions configured by the user.
 
-[Unreleased]: https://github.com/QingJ01/Pebble/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/QingJ01/Pebble/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/QingJ01/Pebble/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/QingJ01/Pebble/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/QingJ01/Pebble/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/QingJ01/Pebble/compare/v0.1.1...v0.1.2
