@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::sync::RwLock;
 
 use async_trait::async_trait;
@@ -13,6 +14,7 @@ use pebble_core::{
 };
 
 const GRAPH_API_BASE: &str = "https://graph.microsoft.com/v1.0/me";
+const GRAPH_MESSAGE_SELECT: &str = "id,subject,bodyPreview,body,from,toRecipients,ccRecipients,isRead,flag,isDraft,receivedDateTime,internetMessageId,conversationId,hasAttachments,categories";
 pub(crate) const MAX_GRAPH_CONTINUATION_PAGES: usize = 1_000;
 
 // ---------------------------------------------------------------------------
@@ -23,6 +25,15 @@ pub(crate) const MAX_GRAPH_CONTINUATION_PAGES: usize = 1_000;
 #[derive(Deserialize)]
 struct GraphMessageList {
     value: Vec<GraphMessage>,
+    #[serde(rename = "@odata.nextLink")]
+    next_link: Option<String>,
+    #[serde(rename = "@odata.deltaLink")]
+    delta_link: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct GraphDeltaList {
+    value: Vec<serde_json::Value>,
     #[serde(rename = "@odata.nextLink")]
     next_link: Option<String>,
     #[serde(rename = "@odata.deltaLink")]
@@ -73,25 +84,125 @@ pub struct OutlookDeltaPage {
     pub delta_link: Option<String>,
 }
 
-fn graph_delta_list_to_changes(list: GraphMessageList, account_id: &str) -> ChangeSet {
-    let mut new_messages = Vec::new();
-    let mut deleted = Vec::new();
-    for gm in &list.value {
-        if gm.removed.is_some() {
-            deleted.push(gm.id.clone());
-        } else {
-            new_messages.push(OutlookProvider::graph_message_to_message(gm, account_id));
+pub(crate) async fn resolve_outlook_delta_page<F, Fut>(
+    list: GraphDeltaList,
+    account_id: &str,
+    mut fetch_message: F,
+) -> Result<OutlookDeltaPage>
+where
+    F: FnMut(String) -> Fut,
+    Fut: Future<Output = Result<Option<serde_json::Value>>>,
+{
+    let mut messages = Vec::new();
+    let mut deleted_remote_ids = Vec::new();
+    for mut value in list.value {
+        let remote_id = value
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .filter(|id| !id.trim().is_empty())
+            .ok_or_else(|| PebbleError::Network("Delta message did not include an ID".to_string()))?
+            .to_string();
+        if let Some(removed) = value.get("@removed").filter(|removed| !removed.is_null()) {
+            serde_json::from_value::<GraphRemoved>(removed.clone()).map_err(|error| {
+                PebbleError::Network(format!("Invalid delta tombstone: {error}"))
+            })?;
+            deleted_remote_ids.push(remote_id);
+            continue;
         }
+
+        // Delta updates may omit unchanged properties even when they were selected.
+        // Fetch a complete current snapshot before converting missing fields to defaults.
+        if !graph_message_has_complete_fields(&value) {
+            let Some(complete) = fetch_message(remote_id.clone()).await? else {
+                // The message can disappear between the delta response and this GET.
+                deleted_remote_ids.push(remote_id);
+                continue;
+            };
+            if complete.get("id").and_then(serde_json::Value::as_str) != Some(remote_id.as_str())
+                || complete
+                    .get("@removed")
+                    .is_some_and(|removed| !removed.is_null())
+                || !graph_message_has_complete_fields(&complete)
+            {
+                return Err(PebbleError::Network(format!(
+                    "Incomplete or mismatched Graph message response for {remote_id}"
+                )));
+            }
+            value = complete;
+        }
+
+        let gm: GraphMessage = serde_json::from_value(value)
+            .map_err(|error| PebbleError::Network(format!("Invalid delta message: {error}")))?;
+        messages.push(OutlookProvider::graph_message_to_message(&gm, account_id));
+    }
+    Ok(OutlookDeltaPage {
+        messages,
+        deleted_remote_ids,
+        next_link: list.next_link,
+        delta_link: list.delta_link,
+    })
+}
+
+fn graph_message_has_complete_fields(value: &serde_json::Value) -> bool {
+    let Some(fields) = value.as_object() else {
+        return false;
+    };
+    if !GRAPH_MESSAGE_SELECT
+        .split(',')
+        // Categories are selected for Graph but are not written into Message.
+        .filter(|field| *field != "categories")
+        .all(|field| fields.contains_key(field))
+    {
+        return false;
     }
 
-    let cursor = list.delta_link.or(list.next_link).unwrap_or_default();
+    fn has_fields_or_null(value: &serde_json::Value, required: &[&str]) -> bool {
+        value.is_null()
+            || value
+                .as_object()
+                .is_some_and(|fields| required.iter().all(|field| fields.contains_key(*field)))
+    }
 
+    fn complete_recipient(value: &serde_json::Value) -> bool {
+        value.is_null()
+            || value
+                .get("emailAddress")
+                .is_some_and(|address| has_fields_or_null(address, &["name", "address"]))
+    }
+
+    // Explicit nulls, empty strings/lists, and false values are intentional values.
+    has_fields_or_null(&fields["body"], &["content", "contentType"])
+        && has_fields_or_null(&fields["flag"], &["flagStatus"])
+        && complete_recipient(&fields["from"])
+        && ["toRecipients", "ccRecipients"].iter().all(|field| {
+            fields[*field].is_null()
+                || fields[*field]
+                    .as_array()
+                    .is_some_and(|recipients| recipients.iter().all(complete_recipient))
+        })
+}
+
+fn graph_message_fetch_url(remote_id: &str) -> Result<String> {
+    let mut url = reqwest::Url::parse(&format!("{GRAPH_API_BASE}/messages/"))
+        .map_err(|error| PebbleError::Network(format!("Invalid Graph message URL: {error}")))?;
+    url.path_segments_mut()
+        .map_err(|_| PebbleError::Network("Invalid Graph message URL base".to_string()))?
+        .pop_if_empty()
+        .push(remote_id);
+    url.query_pairs_mut()
+        .append_pair("$select", GRAPH_MESSAGE_SELECT);
+    Ok(url.to_string())
+}
+
+fn outlook_delta_page_to_changes(page: OutlookDeltaPage) -> ChangeSet {
     ChangeSet {
-        new_messages,
+        new_messages: page.messages,
         flag_changes: vec![],
         moved: vec![],
-        deleted,
-        cursor: SyncCursor { value: cursor },
+        deleted: page.deleted_remote_ids,
+        cursor: SyncCursor {
+            value: page.delta_link.or(page.next_link).unwrap_or_default(),
+        },
     }
 }
 
@@ -552,13 +663,12 @@ impl OutlookProvider {
         limit: u32,
         cursor: Option<&str>,
     ) -> Result<FetchResult> {
-        let select = "id,subject,bodyPreview,body,from,toRecipients,ccRecipients,isRead,flag,isDraft,receivedDateTime,internetMessageId,conversationId,hasAttachments,categories";
         let url = match cursor {
             Some(cursor) if !cursor.is_empty() => {
                 validate_graph_continuation_url(cursor)?.to_string()
             }
             _ => format!(
-                "{GRAPH_API_BASE}/mailFolders/{folder_id}/messages?$top={limit}&$select={select}"
+                "{GRAPH_API_BASE}/mailFolders/{folder_id}/messages?$top={limit}&$select={GRAPH_MESSAGE_SELECT}"
             ),
         };
         let resp = self.get(&url).await?;
@@ -599,13 +709,12 @@ impl OutlookProvider {
         folder_id: &str,
         cursor: Option<&str>,
     ) -> Result<OutlookDeltaPage> {
-        let select = "id,subject,bodyPreview,body,from,toRecipients,ccRecipients,isRead,flag,isDraft,receivedDateTime,internetMessageId,conversationId,hasAttachments,categories";
         let url = match cursor {
             Some(cursor) if !cursor.is_empty() => {
                 validate_graph_continuation_url(cursor)?.to_string()
             }
             _ => format!(
-                "{GRAPH_API_BASE}/mailFolders/{folder_id}/messages/delta?$top=50&$select={select}"
+                "{GRAPH_API_BASE}/mailFolders/{folder_id}/messages/delta?$top=50&$select={GRAPH_MESSAGE_SELECT}"
             ),
         };
 
@@ -616,7 +725,7 @@ impl OutlookProvider {
             return Err(outlook_delta_response_error(status, &text));
         }
 
-        let list: GraphMessageList = resp
+        let list: GraphDeltaList = resp
             .json()
             .await
             .map_err(|e| PebbleError::Network(format!("Failed to parse delta response: {e}")))?;
@@ -627,21 +736,26 @@ impl OutlookProvider {
             validate_graph_continuation_url(continuation)?;
         }
 
-        let mut messages = Vec::new();
-        let mut deleted_remote_ids = Vec::new();
-        for gm in &list.value {
-            if gm.removed.is_some() {
-                deleted_remote_ids.push(gm.id.clone());
-            } else {
-                messages.push(Self::graph_message_to_message(gm, &self.account_id));
-            }
-        }
+        resolve_outlook_delta_page(list, &self.account_id, |remote_id| async move {
+            self.fetch_graph_message(&remote_id).await
+        })
+        .await
+    }
 
-        Ok(OutlookDeltaPage {
-            messages,
-            deleted_remote_ids,
-            next_link: list.next_link,
-            delta_link: list.delta_link,
+    async fn fetch_graph_message(&self, remote_id: &str) -> Result<Option<serde_json::Value>> {
+        let resp = self.get(&graph_message_fetch_url(remote_id)?).await?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(PebbleError::Network(format!(
+                "Failed to fetch Outlook message (status {status}): {text}"
+            )));
+        }
+        resp.json().await.map(Some).map_err(|error| {
+            PebbleError::Network(format!("Failed to parse Outlook message: {error}"))
         })
     }
 
@@ -885,31 +999,12 @@ impl MailTransport for OutlookProvider {
     }
 
     async fn sync_changes(&self, since: &SyncCursor) -> Result<ChangeSet> {
-        // Use delta link from previous sync, or start a new delta query
-        let url = if since.value.starts_with("https://") {
-            since.value.clone()
+        let page = if since.value.starts_with("https://") {
+            self.fetch_delta_page("", Some(&since.value)).await?
         } else {
-            format!(
-                "{GRAPH_API_BASE}/mailFolders/{}/messages/delta",
-                since.value
-            )
+            self.fetch_delta_page(&since.value, None).await?
         };
-
-        let resp = self.get(&url).await?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(PebbleError::Network(format!(
-                "Failed to sync changes (status {status}): {text}"
-            )));
-        }
-
-        let list: GraphMessageList = resp
-            .json()
-            .await
-            .map_err(|e| PebbleError::Network(format!("Failed to parse delta response: {e}")))?;
-
-        Ok(graph_delta_list_to_changes(list, &self.account_id))
+        Ok(outlook_delta_page_to_changes(page))
     }
 
     fn capabilities(&self) -> ProviderCapabilities {
@@ -1595,6 +1690,209 @@ fn parse_graph_datetime(s: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn complete_delta_message(id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "subject": "Preserved subject",
+            "bodyPreview": "Preserved preview",
+            "body": {"contentType": "html", "content": "<p>Preserved body</p>"},
+            "from": {"emailAddress": {"name": "Alice", "address": "alice@example.com"}},
+            "toRecipients": [{"emailAddress": {"name": null, "address": "to@example.com"}}],
+            "ccRecipients": [],
+            "isRead": false,
+            "flag": {"flagStatus": "flagged"},
+            "isDraft": false,
+            "receivedDateTime": "2024-01-15T10:30:00Z",
+            "internetMessageId": "<preserved@example.com>",
+            "conversationId": "conversation-1",
+            "hasAttachments": true
+        })
+    }
+
+    fn delta_list(values: Vec<serde_json::Value>) -> GraphDeltaList {
+        serde_json::from_value(serde_json::json!({
+            "value": values,
+            "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages/delta?$deltatoken=next"
+        }))
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn thin_read_delta_fetches_complete_message_and_uses_its_latest_state() {
+        let list = delta_list(vec![serde_json::json!({"id": "message-1", "isRead": true})]);
+        let mut requested = Vec::new();
+        let page = resolve_outlook_delta_page(list, "account-1", |id| {
+            requested.push(id.clone());
+            std::future::ready(Ok(Some(complete_delta_message(&id))))
+        })
+        .await
+        .unwrap();
+
+        let message = &page.messages[0];
+        assert_eq!(message.subject, "Preserved subject");
+        assert_eq!(message.body_html_raw, "<p>Preserved body</p>");
+        assert_eq!(message.snippet, "Preserved preview");
+        assert_eq!(message.from_address, "alice@example.com");
+        assert_eq!(message.to_list[0].address, "to@example.com");
+        assert_eq!(message.date, 1705314600);
+        assert_eq!(message.thread_id.as_deref(), Some("conversation-1"));
+        assert!(!message.is_read, "the full fetch is newer than the delta");
+        assert!(message.is_starred);
+        assert!(message.has_attachments);
+        assert_eq!(requested, ["message-1"]);
+    }
+
+    #[tokio::test]
+    async fn delta_hydrates_when_any_persisted_field_is_absent() {
+        for field in [
+            "subject",
+            "bodyPreview",
+            "body",
+            "from",
+            "toRecipients",
+            "ccRecipients",
+            "isRead",
+            "flag",
+            "isDraft",
+            "receivedDateTime",
+            "internetMessageId",
+            "conversationId",
+            "hasAttachments",
+        ] {
+            let mut partial = complete_delta_message("message-1");
+            partial.as_object_mut().unwrap().remove(field);
+            let mut requested = Vec::new();
+            let page = resolve_outlook_delta_page(delta_list(vec![partial]), "account-1", |id| {
+                requested.push(id.clone());
+                std::future::ready(Ok(Some(complete_delta_message(&id))))
+            })
+            .await
+            .unwrap();
+            assert_eq!(requested, ["message-1"], "missing {field}");
+            assert_eq!(page.messages[0].subject, "Preserved subject");
+        }
+    }
+
+    #[tokio::test]
+    async fn delta_hydrates_when_nested_content_or_metadata_is_absent() {
+        for (parent, field) in [
+            ("/body", "content"),
+            ("/body", "contentType"),
+            ("/flag", "flagStatus"),
+            ("/from/emailAddress", "name"),
+            ("/from/emailAddress", "address"),
+            ("/toRecipients/0/emailAddress", "name"),
+            ("/toRecipients/0/emailAddress", "address"),
+        ] {
+            let mut partial = complete_delta_message("message-1");
+            partial
+                .pointer_mut(parent)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            let mut requested = Vec::new();
+            resolve_outlook_delta_page(delta_list(vec![partial]), "account-1", |id| {
+                requested.push(id.clone());
+                std::future::ready(Ok(Some(complete_delta_message(&id))))
+            })
+            .await
+            .unwrap();
+            assert_eq!(requested, ["message-1"], "missing {parent}/{field}");
+        }
+    }
+
+    #[tokio::test]
+    async fn complete_delta_accepts_explicit_empty_content_and_nullable_metadata_without_fetching()
+    {
+        let mut complete = complete_delta_message("message-1");
+        complete["subject"] = serde_json::json!("");
+        complete["bodyPreview"] = serde_json::json!("");
+        complete["body"]["content"] = serde_json::json!("");
+        complete["from"] = serde_json::Value::Null;
+        complete["toRecipients"] = serde_json::json!([]);
+        complete["internetMessageId"] = serde_json::Value::Null;
+        complete["conversationId"] = serde_json::Value::Null;
+        complete["hasAttachments"] = serde_json::json!(false);
+        let page = resolve_outlook_delta_page(delta_list(vec![complete]), "account-1", |_| async {
+            panic!("a complete delta must not trigger an additional request")
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(page.messages.len(), 1);
+        assert_eq!(page.messages[0].subject, "");
+        assert_eq!(page.messages[0].body_html_raw, "");
+        assert!(page.messages[0].to_list.is_empty());
+        assert!(!page.messages[0].has_attachments);
+    }
+
+    #[tokio::test]
+    async fn delta_tombstones_do_not_fetch_message_content() {
+        let page = resolve_outlook_delta_page(
+            delta_list(vec![
+                serde_json::json!({"id": "deleted-1", "@removed": {"reason": "deleted"}}),
+            ]),
+            "account-1",
+            |_| async { panic!("a tombstone must not trigger a content request") },
+        )
+        .await
+        .unwrap();
+        assert!(page.messages.is_empty());
+        assert_eq!(page.deleted_remote_ids, ["deleted-1"]);
+    }
+
+    #[tokio::test]
+    async fn delta_treats_message_removed_before_hydration_as_deleted() {
+        let page = resolve_outlook_delta_page(
+            delta_list(vec![serde_json::json!({"id": "gone-1", "isRead": true})]),
+            "account-1",
+            |_| async { Ok(None) },
+        )
+        .await
+        .unwrap();
+        assert!(page.messages.is_empty());
+        assert_eq!(page.deleted_remote_ids, ["gone-1"]);
+        assert!(page.delta_link.is_some());
+    }
+
+    #[tokio::test]
+    async fn delta_hydration_failure_returns_no_page_to_persist() {
+        let result = resolve_outlook_delta_page(
+            delta_list(vec![
+                complete_delta_message("complete-1"),
+                serde_json::json!({"id": "thin-1", "isRead": true}),
+            ]),
+            "account-1",
+            |_| async { Err(PebbleError::Network("Graph unavailable".to_string())) },
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "failed hydration must prevent committing a delta cursor"
+        );
+    }
+
+    #[tokio::test]
+    async fn delta_rejects_incomplete_mismatched_and_removed_hydration_responses() {
+        for invalid in [
+            serde_json::json!({"id": "message-1", "isRead": true}),
+            complete_delta_message("different-message"),
+            serde_json::json!({"id": "message-1", "@removed": {"reason": "deleted"}}),
+        ] {
+            let result = resolve_outlook_delta_page(
+                delta_list(vec![serde_json::json!({"id": "message-1", "isRead": true})]),
+                "account-1",
+                |_| std::future::ready(Ok(Some(invalid.clone()))),
+            )
+            .await;
+            assert!(
+                result.is_err(),
+                "invalid full-message response was accepted: {invalid}"
+            );
+        }
+    }
     use std::collections::VecDeque;
 
     #[test]
@@ -2263,58 +2561,33 @@ mod tests {
     }
 
     #[test]
-    fn graph_delta_list_to_changes_separates_removed_items() {
-        let list = GraphMessageList {
-            value: vec![
-                GraphMessage {
-                    id: "message-1".to_string(),
-                    removed: None,
-                    subject: Some("Hello".to_string()),
-                    body_preview: None,
-                    body: None,
-                    from: None,
-                    to_recipients: None,
-                    cc_recipients: None,
-                    is_read: Some(true),
-                    flag: None,
-                    is_draft: Some(false),
-                    received_date_time: None,
-                    internet_message_id: None,
-                    conversation_id: None,
-                    has_attachments: None,
-                    categories: None,
-                },
-                GraphMessage {
-                    id: "deleted-1".to_string(),
-                    removed: Some(GraphRemoved {
-                        reason: Some("deleted".to_string()),
-                    }),
-                    subject: None,
-                    body_preview: None,
-                    body: None,
-                    from: None,
-                    to_recipients: None,
-                    cc_recipients: None,
-                    is_read: None,
-                    flag: None,
-                    is_draft: None,
-                    received_date_time: None,
-                    internet_message_id: None,
-                    conversation_id: None,
-                    has_attachments: None,
-                    categories: None,
-                },
-            ],
+    fn outlook_delta_page_to_changes_preserves_messages_deletions_and_cursor() {
+        let gm: GraphMessage = serde_json::from_value(complete_delta_message("message-1")).unwrap();
+        let page = OutlookDeltaPage {
+            messages: vec![OutlookProvider::graph_message_to_message(&gm, "account-1")],
+            deleted_remote_ids: vec!["deleted-1".to_string()],
             next_link: None,
             delta_link: Some("delta-link".to_string()),
         };
 
-        let changes = graph_delta_list_to_changes(list, "account-1");
+        let changes = outlook_delta_page_to_changes(page);
 
         assert_eq!(changes.new_messages.len(), 1);
         assert_eq!(changes.new_messages[0].remote_id, "message-1");
         assert_eq!(changes.deleted, vec!["deleted-1".to_string()]);
         assert_eq!(changes.cursor.value, "delta-link");
+    }
+
+    #[test]
+    fn graph_message_fetch_url_encodes_the_remote_id_as_one_path_segment() {
+        let url = reqwest::Url::parse(&graph_message_fetch_url("AAMk/a?b#c+d=").unwrap()).unwrap();
+        assert_eq!(url.host_str(), Some("graph.microsoft.com"));
+        assert_eq!(url.path(), "/v1.0/me/messages/AAMk%2Fa%3Fb%23c+d=");
+        assert_eq!(url.fragment(), None);
+        assert_eq!(
+            url.query_pairs().collect::<Vec<_>>(),
+            [("$select".into(), GRAPH_MESSAGE_SELECT.into())]
+        );
     }
 
     #[test]

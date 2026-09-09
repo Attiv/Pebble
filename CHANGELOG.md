@@ -13,6 +13,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added standards-compatible vCard import and export with duplicate merging, partial-error reporting, UTF-8/folded-line support, and safe file/card limits (#81).
 - Added contacts to local file and WebDAV settings backups using the backward-compatible v2 backup schema (#81).
 
+### Fixed
+
+- Fixed partial Outlook sync updates clearing message subjects, bodies, metadata, and attachments after read or flag changes (#90).
+
 ## [0.1.4] - 2026-08-08
 
 ### Added

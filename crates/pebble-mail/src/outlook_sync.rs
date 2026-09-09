@@ -1432,6 +1432,204 @@ mod tests {
         assert_eq!(stored.body_text, "Updated body");
     }
 
+    fn complete_graph_message(body_type: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": "outlook-partial-delta",
+            "subject": "Keep this subject",
+            "bodyPreview": "Keep this preview",
+            "body": { "contentType": body_type, "content": "Keep this body" },
+            "from": { "emailAddress": { "name": "Sender", "address": "sender@example.com" } },
+            "toRecipients": [{ "emailAddress": { "name": null, "address": "user@example.com" } }],
+            "ccRecipients": [{ "emailAddress": { "name": null, "address": "cc@example.com" } }],
+            "isRead": false,
+            "flag": { "flagStatus": "flagged" },
+            "isDraft": false,
+            "receivedDateTime": "2026-08-24T10:00:00Z",
+            "internetMessageId": "<original@example.com>",
+            "conversationId": "original-conversation",
+            "hasAttachments": true,
+            "categories": []
+        })
+    }
+
+    #[tokio::test]
+    async fn outlook_partial_delta_preserves_stored_content_metadata_and_attachments() {
+        use crate::provider::outlook::resolve_outlook_delta_page;
+
+        for body_type in ["text", "html"] {
+            let store = Arc::new(Store::open_in_memory().unwrap());
+            let folder = make_folder("inbox");
+            store.insert_account(&make_account()).unwrap();
+            store.insert_folder(&folder).unwrap();
+            let attachments_dir =
+                std::env::temp_dir().join(format!("pebble-outlook-partial-delta-{}", new_id()));
+            let (message_tx, mut message_rx) = mpsc::unbounded_channel();
+            let worker = OutlookSyncWorker::new(
+                "account-1",
+                Arc::new(OutlookProvider::new("token".into(), "account-1".into())),
+                Arc::clone(&store),
+                attachments_dir.clone(),
+            )
+            .with_message_tx(message_tx);
+
+            let original_json = complete_graph_message(body_type);
+            let initial_page = resolve_outlook_delta_page(
+                serde_json::from_value(serde_json::json!({ "value": [original_json] })).unwrap(),
+                "account-1",
+                |_| async { panic!("complete message must not be fetched again") },
+            )
+            .await
+            .unwrap();
+            let mut original = initial_page.messages.into_iter().next().unwrap();
+            original.created_at = 123;
+            let failures = worker
+                .persist_folder_messages_with_attachment_fetch(
+                    &folder,
+                    vec![original.clone()],
+                    false,
+                    |_| async {
+                        Ok(vec![make_attachment_data(
+                            "keep.txt",
+                            b"attachment contents",
+                        )])
+                    },
+                )
+                .await;
+            assert_eq!(failures, 0);
+            message_rx.try_recv().unwrap();
+            let original = store.get_message(&original.id).unwrap().unwrap();
+
+            // A read change omits the star; a star change omits the read state.
+            let mut fetched = complete_graph_message(body_type);
+            let partial = if body_type == "text" {
+                fetched["isRead"] = serde_json::json!(true);
+                serde_json::json!({ "id": original.remote_id, "isRead": true })
+            } else {
+                fetched["flag"]["flagStatus"] = serde_json::json!("notFlagged");
+                serde_json::json!({ "id": original.remote_id, "flag": { "flagStatus": "notFlagged" } })
+            };
+            let page = resolve_outlook_delta_page(
+                serde_json::from_value(serde_json::json!({ "value": [partial] })).unwrap(),
+                "account-1",
+                |remote_id| {
+                    assert_eq!(remote_id, original.remote_id);
+                    let fetched = fetched.clone();
+                    async move { Ok(Some(fetched)) }
+                },
+            )
+            .await
+            .unwrap();
+            let failures = worker
+                .persist_folder_messages_with_attachment_fetch(
+                    &folder,
+                    page.messages,
+                    true,
+                    |_| async {
+                        Ok(vec![make_attachment_data(
+                            "keep.txt",
+                            b"attachment contents",
+                        )])
+                    },
+                )
+                .await;
+            assert_eq!(failures, 0);
+
+            let stored = store.get_message(&original.id).unwrap().unwrap();
+            assert_eq!(stored.subject, original.subject);
+            assert_eq!(stored.snippet, original.snippet);
+            assert_eq!(stored.body_text, original.body_text);
+            assert_eq!(stored.body_html_raw, original.body_html_raw);
+            assert_eq!(stored.from_name, original.from_name);
+            assert_eq!(stored.from_address, original.from_address);
+            assert_eq!(
+                serde_json::to_value(&stored.to_list).unwrap(),
+                serde_json::to_value(&original.to_list).unwrap()
+            );
+            assert_eq!(
+                serde_json::to_value(&stored.cc_list).unwrap(),
+                serde_json::to_value(&original.cc_list).unwrap()
+            );
+            assert_eq!(stored.date, original.date);
+            assert_eq!(stored.message_id_header, original.message_id_header);
+            // Existing-message updates use the server's conversation ID.
+            assert_eq!(stored.thread_id.as_deref(), Some("original-conversation"));
+            assert_eq!(stored.created_at, original.created_at);
+            assert_eq!(stored.is_read, body_type == "text");
+            assert_eq!(stored.is_starred, body_type == "text");
+            assert!(!stored.is_draft);
+            assert!(stored.has_attachments);
+            let attachments = store.list_attachments_by_message(&original.id).unwrap();
+            assert_eq!(attachments.len(), 1);
+            assert_eq!(attachments[0].filename, "keep.txt");
+            assert_eq!(
+                std::fs::read(attachments[0].local_path.as_ref().unwrap()).unwrap(),
+                b"attachment contents"
+            );
+            let event = message_rx.try_recv().unwrap();
+            assert_eq!(event.message.subject, original.subject);
+            assert!(
+                !event.notify,
+                "updating existing mail must not notify as new mail"
+            );
+            std::fs::remove_dir_all(attachments_dir).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn outlook_complete_delta_can_clear_content_and_flags() {
+        use crate::provider::outlook::resolve_outlook_delta_page;
+
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let folder = make_folder("inbox");
+        store.insert_account(&make_account()).unwrap();
+        store.insert_folder(&folder).unwrap();
+        let mut original = make_message("outlook-partial-delta");
+        original.subject = "Previous subject".into();
+        original.body_text = "Previous body".into();
+        original.is_read = true;
+        original.is_starred = true;
+        store
+            .insert_message(&original, std::slice::from_ref(&folder.id))
+            .unwrap();
+
+        let mut cleared = complete_graph_message("text");
+        cleared["subject"] = serde_json::json!("");
+        cleared["bodyPreview"] = serde_json::json!("");
+        cleared["body"]["content"] = serde_json::json!("");
+        cleared["toRecipients"] = serde_json::json!([]);
+        cleared["ccRecipients"] = serde_json::json!([]);
+        cleared["flag"]["flagStatus"] = serde_json::json!("notFlagged");
+        cleared["hasAttachments"] = serde_json::json!(false);
+        let page = resolve_outlook_delta_page(
+            serde_json::from_value(serde_json::json!({ "value": [cleared] })).unwrap(),
+            "account-1",
+            |_| async { panic!("explicit empty values are a complete message") },
+        )
+        .await
+        .unwrap();
+        let worker = OutlookSyncWorker::new(
+            "account-1",
+            Arc::new(OutlookProvider::new("token".into(), "account-1".into())),
+            Arc::clone(&store),
+            std::env::temp_dir(),
+        );
+        assert_eq!(
+            worker
+                .persist_folder_messages(&folder, page.messages, false)
+                .await,
+            0
+        );
+        let stored = store.get_message(&original.id).unwrap().unwrap();
+        assert!(stored.subject.is_empty());
+        assert!(stored.snippet.is_empty());
+        assert!(stored.body_text.is_empty());
+        assert!(stored.body_html_raw.is_empty());
+        assert!(stored.to_list.is_empty());
+        assert!(stored.cc_list.is_empty());
+        assert!(!stored.is_read);
+        assert!(!stored.is_starred);
+    }
+
     #[tokio::test]
     async fn outlook_delta_removes_attachments_deleted_from_an_existing_message() {
         let store = Arc::new(Store::open_in_memory().unwrap());
