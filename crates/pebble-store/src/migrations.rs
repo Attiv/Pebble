@@ -2,7 +2,7 @@ use pebble_core::{build_snippet, PebbleError, Result};
 use rusqlite::{Connection, OptionalExtension};
 use std::collections::HashSet;
 
-const CURRENT_VERSION: u32 = 17;
+const CURRENT_VERSION: u32 = 18;
 const ACCOUNT_COLOR_PRESETS: [&str; 12] = [
     "#0ea5e9", "#22c55e", "#f59e0b", "#8b5cf6", "#f43f5e", "#14b8a6", "#6366f1", "#f97316",
     "#06b6d4", "#ec4899", "#84cc16", "#3b82f6",
@@ -958,9 +958,23 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
              );",
         )
         .map_err(|e| PebbleError::Storage(format!("Migration V17 failed: {e}")))?;
-        set_schema_version(&tx, CURRENT_VERSION)?;
+        set_schema_version(&tx, 17)?;
         tx.commit()
             .map_err(|e| PebbleError::Storage(format!("Migration V17 commit failed: {e}")))?;
+    }
+
+    if version < 18 {
+        let tx = conn.unchecked_transaction()?;
+        // Lightweight migration fixtures may intentionally omit accounts.
+        if table_exists(&tx, "accounts")? {
+            tx.execute_batch(
+                "ALTER TABLE accounts ADD COLUMN account_label TEXT;
+                ALTER TABLE accounts ADD COLUMN provider_display_name TEXT;
+                ALTER TABLE accounts ADD COLUMN oauth_subject TEXT;",
+            )?;
+        }
+        set_schema_version(&tx, CURRENT_VERSION)?;
+        tx.commit()?;
     }
 
     Ok(())
@@ -1111,6 +1125,48 @@ mod tests {
     use super::*;
 
     #[test]
+    fn migration_v18_preserves_existing_identity_and_rolls_back_on_failure() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE accounts (id TEXT PRIMARY KEY, email TEXT, display_name TEXT, auth_data BLOB);
+             INSERT INTO accounts VALUES ('a', 'old@example.com', 'Original Name', X'1234');
+             PRAGMA user_version=17;",
+        ).unwrap();
+        run_migrations(&conn).unwrap();
+        let values: (String, String, Vec<u8>, Option<String>, Option<String>, Option<String>) = conn.query_row(
+            "SELECT email, display_name, auth_data, account_label, provider_display_name, oauth_subject FROM accounts WHERE id='a'",
+            [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+        ).unwrap();
+        assert_eq!(
+            values,
+            (
+                "old@example.com".into(),
+                "Original Name".into(),
+                vec![0x12, 0x34],
+                None,
+                None,
+                None
+            )
+        );
+
+        let broken = Connection::open_in_memory().unwrap();
+        broken.execute_batch("CREATE TABLE accounts (id TEXT, provider_display_name TEXT); PRAGMA user_version=17;").unwrap();
+        assert!(run_migrations(&broken).is_err());
+        assert_eq!(
+            broken
+                .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
+                .unwrap(),
+            17
+        );
+        assert!(
+            broken
+                .prepare("SELECT account_label FROM accounts")
+                .is_err(),
+            "earlier ALTER must roll back when a later ALTER fails"
+        );
+    }
+
+    #[test]
     fn migration_v17_creates_contact_tables() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA user_version=14;")
@@ -1121,7 +1177,7 @@ mod tests {
         let version: u32 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 17);
+        assert_eq!(version, CURRENT_VERSION);
 
         conn.execute_batch(
             "INSERT INTO contacts

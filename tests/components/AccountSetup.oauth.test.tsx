@@ -78,7 +78,7 @@ describe("AccountSetup OAuth", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign in with Google" }));
 
     await waitFor(() => {
-      expect(completeOAuthFlow).toHaveBeenCalledWith("gmail", "", "", undefined, undefined);
+      expect(completeOAuthFlow).toHaveBeenCalledWith("gmail", "", "", undefined, undefined, undefined);
     });
     await waitFor(() => {
       expect(startSync).toHaveBeenCalledWith("account-1", 3);
@@ -116,7 +116,7 @@ describe("AccountSetup OAuth", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign in with Google" }));
 
     await waitFor(() => {
-      expect(completeOAuthFlow).toHaveBeenCalledWith("gmail", "", "", "127.0.0.1", 7890);
+      expect(completeOAuthFlow).toHaveBeenCalledWith("gmail", "", "", "127.0.0.1", 7890, undefined);
     });
   });
 
@@ -158,7 +158,7 @@ describe("AccountSetup OAuth", () => {
     fireEvent.change(screen.getByLabelText("Email address"), {
       target: { value: "legacy@example.com" },
     });
-    fireEvent.change(screen.getByLabelText("Display name"), {
+    fireEvent.change(screen.getByLabelText("Sender name"), {
       target: { value: "Legacy" },
     });
     fireEvent.change(screen.getByLabelText("Incoming protocol"), {
@@ -227,7 +227,7 @@ describe("AccountSetup OAuth", () => {
     fireEvent.change(screen.getByLabelText("Email address"), {
       target: { value: "user@hotmail.com" },
     });
-    fireEvent.change(screen.getByLabelText("Display name"), {
+    fireEvent.change(screen.getByLabelText("Sender name"), {
       target: { value: "Hotmail" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Outlook" }));
@@ -301,7 +301,7 @@ describe("AccountSetup OAuth", () => {
     fireEvent.change(screen.getByLabelText("Email address"), {
       target: { value: "legacy@88.com" },
     });
-    fireEvent.change(screen.getByLabelText("Display name"), {
+    fireEvent.change(screen.getByLabelText("Sender name"), {
       target: { value: "Legacy" },
     });
     fireEvent.change(screen.getByLabelText("IMAP host"), {

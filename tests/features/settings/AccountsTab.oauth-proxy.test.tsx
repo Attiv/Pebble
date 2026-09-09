@@ -78,6 +78,19 @@ vi.mock("../../../src/stores/toast.store", () => ({
 }));
 
 describe("AccountsTab OAuth proxy", () => {
+  it("edits a local label independently and keeps the OAuth address read-only", async () => {
+    render(<AccountsTab />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit account" }));
+    const label = await screen.findByLabelText("Account label") as HTMLInputElement;
+    fireEvent.change(label, { target: { value: "Work only" } });
+    expect((screen.getByLabelText("accountSetup.emailAddress") as HTMLInputElement).readOnly).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    await waitFor(() => expect(updateAccount).toHaveBeenCalled());
+    const args = vi.mocked(updateAccount).mock.calls[0];
+    expect(args[1]).toBe("user@example.com");
+    expect(args[2]).toBe("User");
+    expect(args[14]).toBe("Work only");
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getOAuthAccountProxySetting).mockResolvedValue({
@@ -127,6 +140,7 @@ describe("AccountsTab OAuth proxy", () => {
         undefined,
         undefined,
         "#22c55e",
+        "",
       );
     });
     expect(updateOAuthAccountProxySetting).toHaveBeenCalledWith(
@@ -188,6 +202,7 @@ describe("AccountsTab OAuth proxy", () => {
         undefined,
         undefined,
         "#f97316",
+        "",
       );
     });
   });
@@ -217,6 +232,7 @@ describe("AccountsTab OAuth proxy", () => {
         undefined,
         undefined,
         "#0ea5e9",
+        "",
       );
     });
   });

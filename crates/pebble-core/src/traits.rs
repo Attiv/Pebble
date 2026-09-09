@@ -44,6 +44,7 @@ pub struct AuthCredentials {
 }
 
 pub struct OutgoingMessage {
+    pub from: EmailAddress,
     pub to: Vec<EmailAddress>,
     pub cc: Vec<EmailAddress>,
     pub bcc: Vec<EmailAddress>,

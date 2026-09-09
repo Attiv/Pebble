@@ -908,6 +908,8 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let now = now_timestamp();
         let account = Account {
+            account_label: None,
+            provider_display_name: None,
             id: new_id(),
             email: "me@example.com".to_string(),
             display_name: "Me".to_string(),
@@ -1011,6 +1013,8 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let now = now_timestamp();
         let account = Account {
+            account_label: None,
+            provider_display_name: None,
             id: new_id(),
             email: "me@example.com".to_string(),
             display_name: "Me".to_string(),

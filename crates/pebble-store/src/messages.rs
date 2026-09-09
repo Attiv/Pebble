@@ -1845,6 +1845,8 @@ mod remote_id_scope_tests {
     fn make_account() -> Account {
         let now = now_timestamp();
         Account {
+            account_label: None,
+            provider_display_name: None,
             id: new_id(),
             email: "imap@example.com".to_string(),
             display_name: "IMAP".to_string(),
@@ -2609,6 +2611,8 @@ mod tombstone_tests {
         let store = Store::open_in_memory().unwrap();
         let now = now_timestamp();
         let account = Account {
+            account_label: None,
+            provider_display_name: None,
             id: new_id(),
             email: "test@example.com".to_string(),
             display_name: "Test".to_string(),
@@ -2704,6 +2708,8 @@ mod thread_listing_tests {
     fn seed_account_and_folder(store: &Store) -> (String, String) {
         let now = now_timestamp();
         let account = Account {
+            account_label: None,
+            provider_display_name: None,
             id: new_id(),
             email: "test@example.com".to_string(),
             display_name: "Test".to_string(),

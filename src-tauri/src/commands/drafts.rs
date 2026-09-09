@@ -148,7 +148,14 @@ pub async fn save_draft(
         &account_id,
         existing_draft_id.as_deref(),
     )?;
+    let account = state
+        .store
+        .get_account(&account_id)?
+        .ok_or_else(|| PebbleError::Validation("Account not found".into()))?;
+    let sender = account.sender_identity();
+    pebble_mail::sender::sender_mailbox(&sender)?;
     let draft = DraftMessage {
+        from: Some(sender),
         id: provenance.remote_id.clone(),
         to: to
             .into_iter()
@@ -286,8 +293,16 @@ fn save_draft_locally(
         thread_id: None,
         subject: draft.subject.clone(),
         snippet: draft.body_text.chars().take(200).collect(),
-        from_address: String::new(),
-        from_name: String::new(),
+        from_address: draft
+            .from
+            .as_ref()
+            .map(|from| from.address.clone())
+            .unwrap_or_default(),
+        from_name: draft
+            .from
+            .as_ref()
+            .and_then(|from| from.name.clone())
+            .unwrap_or_default(),
         to_list: draft.to.clone(),
         cc_list: draft.cc.clone(),
         bcc_list: draft.bcc.clone(),
@@ -374,6 +389,8 @@ mod tests {
     fn make_account(id: &str, email: &str, provider: ProviderType) -> Account {
         let now = now_timestamp();
         Account {
+            account_label: None,
+            provider_display_name: None,
             id: id.to_string(),
             email: email.to_string(),
             display_name: email.to_string(),
@@ -418,6 +435,7 @@ mod tests {
 
     fn draft_message(subject: &str) -> DraftMessage {
         DraftMessage {
+            from: None,
             id: None,
             to: Vec::new(),
             cc: Vec::new(),

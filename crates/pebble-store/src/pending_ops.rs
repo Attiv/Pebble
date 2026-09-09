@@ -448,6 +448,11 @@ impl Store {
     }
 
     pub fn mark_pending_mail_op_outcome_unknown(&self, id: &str, error: &str) -> Result<()> {
+        self.mark_pending_mail_op_stopped(id, error)
+    }
+
+    /// Keep the operation visible, but require manual intervention before another attempt.
+    pub fn mark_pending_mail_op_stopped(&self, id: &str, error: &str) -> Result<()> {
         self.with_write(|conn| {
             conn.execute(
                 "UPDATE pending_mail_ops
@@ -557,11 +562,68 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restore_cannot_attach_new_credentials_to_legacy_cached_mail() {
+        use crate::cloud_sync::{RestoredAuthData, RestoredPrivateData};
+        let store = Store::open_in_memory().unwrap();
+        let mut account = test_account();
+        account.provider = ProviderType::Outlook;
+        store.insert_account(&account).unwrap();
+        let message = test_message(&account.id);
+        store.insert_message(&message, &[]).unwrap();
+        let backup = store.export_settings().unwrap();
+        store
+            .import_settings_with_private_data(
+                &backup,
+                RestoredPrivateData {
+                    auth_data: vec![RestoredAuthData {
+                        account_id: account.id.clone(),
+                        provider: "outlook".into(),
+                        encrypted: b"other-mailbox-token".to_vec(),
+                    }],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(store.get_auth_data(&account.id).unwrap().is_none());
+        assert_eq!(
+            store.get_message(&message.id).unwrap().unwrap().subject,
+            message.subject
+        );
+    }
+
+    #[test]
+    fn stopped_sender_operation_stays_visible_without_becoming_retryable() {
+        let store = Store::open_in_memory().unwrap();
+        let account = test_account();
+        store.insert_account(&account).unwrap();
+        let message = test_message(&account.id);
+        store.insert_message(&message, &[]).unwrap();
+        let op = store
+            .insert_pending_mail_op(&account.id, &message.id, "send", r#"{"op":"send"}"#)
+            .unwrap();
+        store
+            .mark_pending_mail_op_stopped(&op, "Sender identity needs attention; no mail sent")
+            .unwrap();
+        let active = store
+            .list_active_pending_mail_ops(Some(&account.id), 10)
+            .unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].status, PendingMailOpStatus::Failed);
+        assert_eq!(active[0].attempts, MAX_PENDING_MAIL_OP_ATTEMPTS);
+        assert!(store
+            .list_retryable_pending_mail_ops(10)
+            .unwrap()
+            .is_empty());
+    }
     use pebble_core::*;
 
     fn test_account() -> Account {
         let now = now_timestamp();
         Account {
+            account_label: None,
+            provider_display_name: None,
             id: new_id(),
             email: "test@example.com".to_string(),
             display_name: "Test".to_string(),

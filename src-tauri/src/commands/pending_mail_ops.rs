@@ -1,6 +1,6 @@
 use crate::commands::attachments::cleanup_staged_attachment_records;
 use crate::{events, state::AppState};
-use pebble_core::traits::{FolderProvider, LabelProvider, MailTransport};
+use pebble_core::traits::{FolderProvider, LabelProvider};
 use pebble_core::{FolderRole, Message, PebbleError, ProviderType};
 use pebble_store::pending_ops::{PendingMailOp, PendingMailOpsSummary};
 use pebble_store::Store;
@@ -178,6 +178,12 @@ pub async fn process_pending_mail_ops(
                     .mark_pending_mail_op_failed(&op.id, &e.to_string())?;
                 warn!("Pending mail op {} retry failed: {e}", op.id);
             }
+            Err(ReplayPendingMailOpError::SenderIdentityBlocked(e)) => {
+                state.store.mark_pending_mail_op_stopped(
+                    &op.id,
+                    &format!("Sender identity requires attention; no message was sent. {e}"),
+                )?;
+            }
         }
     }
 
@@ -189,6 +195,7 @@ pub async fn process_pending_mail_ops(
 
 #[derive(Debug)]
 enum ReplayPendingMailOpError {
+    SenderIdentityBlocked(PebbleError),
     Retryable(PebbleError),
     RemoteSendOutcomeUnknown(PebbleError),
 }
@@ -608,7 +615,7 @@ async fn replay_remote_move_to_folder(
 
 async fn replay_remote_send(
     state: &AppState,
-    provider_type: ProviderType,
+    _provider_type: ProviderType,
     account: &pebble_core::Account,
     message: &pebble_core::Message,
 ) -> std::result::Result<(), ReplayPendingMailOpError> {
@@ -619,20 +626,31 @@ async fn replay_remote_send(
         .filter_map(|attachment| attachment.local_path)
         .collect::<Vec<_>>();
     let outgoing = compose::outgoing_message_from_stored(message, attachment_paths);
-
-    match provider_type {
-        ProviderType::Gmail => {
-            let provider = connect_gmail(state, &account.id).await?;
-            classify_remote_send_call(provider.send_message(&outgoing).await)
-        }
-        ProviderType::Outlook => {
-            let provider = connect_outlook(state, &account.id).await?;
-            classify_remote_send_call(provider.send_message(&outgoing).await)
-        }
-        ProviderType::Imap | ProviderType::Pop3 => classify_remote_send_call(
-            compose::send_imap_smtp_message(state, account, &outgoing).await,
-        ),
+    pebble_mail::sender::sender_mailbox(&outgoing.from)
+        .map_err(ReplayPendingMailOpError::SenderIdentityBlocked)?;
+    // Preparation errors are pre-dispatch and must never become outcome-unknown.
+    let (transport, verified_from) = compose::prepare_send_transport(state, account)
+        .await
+        .map_err(|error| {
+            if matches!(error, PebbleError::Validation(_)) {
+                ReplayPendingMailOpError::SenderIdentityBlocked(error)
+            } else {
+                ReplayPendingMailOpError::Retryable(error)
+            }
+        })?;
+    if matches!(
+        account.provider,
+        ProviderType::Gmail | ProviderType::Outlook
+    ) && !outgoing
+        .from
+        .address
+        .eq_ignore_ascii_case(&verified_from.address)
+    {
+        return Err(ReplayPendingMailOpError::SenderIdentityBlocked(PebbleError::Validation(
+            "The queued message belongs to a different mailbox. Review it and compose a new message if needed.".into(),
+        )));
     }
+    classify_remote_send_call(transport.send(&outgoing).await)
 }
 
 fn apply_pending_local_commit(
@@ -852,6 +870,8 @@ mod tests {
     fn test_account() -> Account {
         let now = now_timestamp();
         Account {
+            account_label: None,
+            provider_display_name: None,
             id: new_id(),
             email: "test@example.com".to_string(),
             display_name: "Test".to_string(),

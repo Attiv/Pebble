@@ -11,6 +11,8 @@
 
 /** @rust pebble-core/src/types.rs → Account */
 export interface Account {
+  account_label?: string | null;
+  provider_display_name?: string | null;
   id: string;
   email: string;
   display_name: string;
@@ -164,6 +166,7 @@ export type ConnectionSecurity = "tls" | "starttls" | "plain";
 
 /** @rust src-tauri/src/commands/accounts.rs → AddAccountRequest */
 export interface AddAccountRequest {
+  account_label?: string | null;
   email: string;
   display_name: string;
   provider: string;

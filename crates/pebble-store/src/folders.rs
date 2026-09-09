@@ -365,6 +365,8 @@ mod tests {
     fn account() -> Account {
         let now = now_timestamp();
         Account {
+            account_label: None,
+            provider_display_name: None,
             id: "account-1".to_string(),
             email: "user@example.com".to_string(),
             display_name: "User".to_string(),

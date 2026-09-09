@@ -272,6 +272,7 @@ struct GraphSendMail {
 
 #[derive(Serialize)]
 struct GraphOutgoingMessage {
+    from: GraphOutgoingRecipient,
     subject: String,
     body: GraphOutgoingBody,
     #[serde(rename = "toRecipients")]
@@ -971,6 +972,11 @@ impl MailTransport for OutlookProvider {
 
         let body = GraphSendMail {
             message: GraphOutgoingMessage {
+                // Exchange controls the name. Only submit the verified mailbox address.
+                from: email_to_graph_recipient(&EmailAddress {
+                    name: None,
+                    address: message.from.address.clone(),
+                }),
                 subject: message.subject.clone(),
                 body: GraphOutgoingBody {
                     content_type,
@@ -1641,6 +1647,7 @@ fn graph_message_to_draft(gm: &GraphMessage) -> DraftMessage {
         .unwrap_or_default();
 
     DraftMessage {
+        from: None,
         id: Some(gm.id.clone()),
         to,
         cc,

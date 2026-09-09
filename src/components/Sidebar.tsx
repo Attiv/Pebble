@@ -1,3 +1,4 @@
+import { accountOptionLabel } from "@/lib/accountIdentity";
 import { useEffect, useMemo } from "react";
 import {
   Inbox,
@@ -208,7 +209,7 @@ export default function Sidebar() {
       )}
 
       {/* Account switcher */}
-      {!sidebarCollapsed && accounts.length > 1 && (
+      {!sidebarCollapsed && accounts.length > 0 && (
         <div style={{ padding: "0 10px 8px" }}>
           <select
             aria-label={t("settings.emailAccounts", "Email Accounts")}
@@ -233,7 +234,7 @@ export default function Sidebar() {
             </option>
             {accounts.map((acc) => (
               <option key={acc.id} value={acc.id}>
-                {acc.email}
+                {accountOptionLabel(acc)}
               </option>
             ))}
           </select>

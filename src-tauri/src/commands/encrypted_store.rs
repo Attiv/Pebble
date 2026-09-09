@@ -118,6 +118,8 @@ mod tests {
     fn insert_account(store: &Store, id: &str) {
         store
             .insert_account(&Account {
+                account_label: None,
+                provider_display_name: None,
                 id: id.to_string(),
                 email: format!("{id}@example.com"),
                 display_name: id.to_string(),

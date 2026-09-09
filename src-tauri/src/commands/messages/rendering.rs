@@ -95,6 +95,8 @@ mod tests {
     fn make_account(id: &str) -> Account {
         let now = now_timestamp();
         Account {
+            account_label: None,
+            provider_display_name: None,
             id: id.to_string(),
             email: "me@example.com".to_string(),
             display_name: "Me".to_string(),

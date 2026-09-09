@@ -44,7 +44,7 @@ impl SmtpSender {
     #[allow(clippy::too_many_arguments)]
     pub async fn send(
         &self,
-        from: &str,
+        from: &pebble_core::EmailAddress,
         to: &[String],
         cc: &[String],
         bcc: &[String],
@@ -54,88 +54,17 @@ impl SmtpSender {
         in_reply_to: Option<&str>,
         attachment_paths: &[String],
     ) -> Result<()> {
-        if to.is_empty() {
-            return Err(PebbleError::Internal("No recipients".to_string()));
-        }
-
-        let from_mailbox: Mailbox = from
-            .parse()
-            .map_err(|e| PebbleError::Internal(format!("Invalid from address: {e}")))?;
-
-        let mut builder = lettre::Message::builder()
-            .from(from_mailbox)
-            .subject(subject);
-
-        for addr in to {
-            let mailbox: Mailbox = addr
-                .parse()
-                .map_err(|e| PebbleError::Internal(format!("Invalid to address '{addr}': {e}")))?;
-            builder = builder.to(mailbox);
-        }
-
-        for addr in cc {
-            let mailbox: Mailbox = addr
-                .parse()
-                .map_err(|e| PebbleError::Internal(format!("Invalid cc address '{addr}': {e}")))?;
-            builder = builder.cc(mailbox);
-        }
-
-        for addr in bcc {
-            let mailbox: Mailbox = addr
-                .parse()
-                .map_err(|e| PebbleError::Internal(format!("Invalid bcc address '{addr}': {e}")))?;
-            builder = builder.bcc(mailbox);
-        }
-
-        if let Some(reply_to) = in_reply_to {
-            builder = builder.in_reply_to(reply_to.to_string());
-        }
-
-        let alternative_body = MultiPart::alternative()
-            .singlepart(
-                SinglePart::builder()
-                    .content_type(ContentType::TEXT_PLAIN)
-                    .body(body_text.to_string()),
-            )
-            .singlepart(
-                SinglePart::builder()
-                    .content_type(ContentType::TEXT_HTML)
-                    .body(body_html.unwrap_or(body_text).to_string()),
-            );
-
-        let email = if attachment_paths.is_empty() {
-            builder
-                .multipart(alternative_body)
-                .map_err(|e| PebbleError::Internal(format!("Failed to build email: {e}")))?
-        } else {
-            let mut mixed = MultiPart::mixed().multipart(alternative_body);
-
-            for path_str in attachment_paths {
-                let path = Path::new(path_str);
-                let filename = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("attachment")
-                    .to_string();
-
-                let file_bytes = std::fs::read(path).map_err(|e| {
-                    PebbleError::Internal(format!("Failed to read attachment '{}': {e}", path_str))
-                })?;
-
-                let content_type = mime_type_from_extension(
-                    path.extension().and_then(|e| e.to_str()).unwrap_or(""),
-                );
-
-                let attachment =
-                    Attachment::new(filename).body(Body::new(file_bytes), content_type);
-
-                mixed = mixed.singlepart(attachment);
-            }
-
-            builder
-                .multipart(mixed)
-                .map_err(|e| PebbleError::Internal(format!("Failed to build email: {e}")))?
-        };
+        let email = build_message(
+            from,
+            to,
+            cc,
+            bcc,
+            subject,
+            body_text,
+            body_html,
+            in_reply_to,
+            attachment_paths,
+        )?;
 
         if let Some(ref proxy) = self.proxy {
             self.send_via_proxy(&email, proxy).await
@@ -534,5 +463,133 @@ mod tls_config_tests {
     fn build_native_tls_connector_returns_result() {
         assert!(build_native_tls_connector(false).is_ok());
         assert!(build_native_tls_connector(true).is_ok());
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_message(
+    from: &pebble_core::EmailAddress,
+    to: &[String],
+    cc: &[String],
+    bcc: &[String],
+    subject: &str,
+    body_text: &str,
+    body_html: Option<&str>,
+    in_reply_to: Option<&str>,
+    attachment_paths: &[String],
+) -> Result<lettre::Message> {
+    if to.is_empty() {
+        return Err(PebbleError::Internal("No recipients".to_string()));
+    }
+
+    let from_mailbox = crate::sender::sender_mailbox(from)?;
+
+    let mut builder = lettre::Message::builder()
+        .from(from_mailbox)
+        .subject(subject);
+
+    for addr in to {
+        let mailbox: Mailbox = addr
+            .parse()
+            .map_err(|e| PebbleError::Internal(format!("Invalid to address '{addr}': {e}")))?;
+        builder = builder.to(mailbox);
+    }
+
+    for addr in cc {
+        let mailbox: Mailbox = addr
+            .parse()
+            .map_err(|e| PebbleError::Internal(format!("Invalid cc address '{addr}': {e}")))?;
+        builder = builder.cc(mailbox);
+    }
+
+    for addr in bcc {
+        let mailbox: Mailbox = addr
+            .parse()
+            .map_err(|e| PebbleError::Internal(format!("Invalid bcc address '{addr}': {e}")))?;
+        builder = builder.bcc(mailbox);
+    }
+
+    if let Some(reply_to) = in_reply_to {
+        builder = builder.in_reply_to(reply_to.to_string());
+    }
+
+    let alternative_body = MultiPart::alternative()
+        .singlepart(
+            SinglePart::builder()
+                .content_type(ContentType::TEXT_PLAIN)
+                .body(body_text.to_string()),
+        )
+        .singlepart(
+            SinglePart::builder()
+                .content_type(ContentType::TEXT_HTML)
+                .body(body_html.unwrap_or(body_text).to_string()),
+        );
+
+    let email = if attachment_paths.is_empty() {
+        builder
+            .multipart(alternative_body)
+            .map_err(|e| PebbleError::Internal(format!("Failed to build email: {e}")))?
+    } else {
+        let mut mixed = MultiPart::mixed().multipart(alternative_body);
+
+        for path_str in attachment_paths {
+            let path = Path::new(path_str);
+            let filename = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("attachment")
+                .to_string();
+
+            let file_bytes = std::fs::read(path).map_err(|e| {
+                PebbleError::Internal(format!("Failed to read attachment '{}': {e}", path_str))
+            })?;
+
+            let content_type =
+                mime_type_from_extension(path.extension().and_then(|e| e.to_str()).unwrap_or(""));
+
+            let attachment = Attachment::new(filename).body(Body::new(file_bytes), content_type);
+
+            mixed = mixed.singlepart(attachment);
+        }
+
+        builder
+            .multipart(mixed)
+            .map_err(|e| PebbleError::Internal(format!("Failed to build email: {e}")))?
+    };
+
+    Ok(email)
+}
+
+#[cfg(test)]
+mod sender_identity_tests {
+    use super::*;
+
+    #[test]
+    fn smtp_wire_name_is_encoded_without_changing_envelope_address() {
+        let from = pebble_core::EmailAddress {
+            name: Some("张三, \"财务\"".into()),
+            address: "sender@example.com".into(),
+        };
+        let message = build_message(
+            &from,
+            &["to@example.com".into()],
+            &[],
+            &[],
+            "Subject",
+            "Body",
+            None,
+            None,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            message.envelope().from().unwrap().to_string(),
+            "sender@example.com"
+        );
+        let raw = message.formatted();
+        let parsed = mail_parser::MessageParser::default().parse(&raw).unwrap();
+        let sender = parsed.from().unwrap().first().unwrap();
+        assert_eq!(sender.name.as_deref(), from.name.as_deref());
+        assert_eq!(sender.address.as_deref(), Some("sender@example.com"));
     }
 }

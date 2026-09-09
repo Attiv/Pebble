@@ -3,6 +3,12 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Account {
+    /// A local label, never used in outbound mail headers.
+    #[serde(default)]
+    pub account_label: Option<String>,
+    /// Last verified provider-managed name (Outlook).
+    #[serde(default)]
+    pub provider_display_name: Option<String>,
     pub id: String,
     pub email: String,
     pub display_name: String,
@@ -10,6 +16,31 @@ pub struct Account {
     pub provider: ProviderType,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+impl Account {
+    /// Local account labels must never participate in the outgoing identity.
+    pub fn sender_identity(&self) -> EmailAddress {
+        let name = if self.provider == ProviderType::Outlook {
+            self.provider_display_name.as_deref()
+        } else {
+            Some(self.display_name.as_str())
+        };
+        EmailAddress {
+            name: name
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned),
+            address: self.email.trim().to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OAuthMailboxIdentity {
+    pub subject: String,
+    pub email: String,
+    pub display_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -353,6 +384,8 @@ pub struct Category {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DraftMessage {
+    #[serde(default)]
+    pub from: Option<EmailAddress>,
     pub id: Option<String>,
     pub to: Vec<EmailAddress>,
     pub cc: Vec<EmailAddress>,

@@ -12,7 +12,7 @@ use crate::{contacts::list_all_contacts_for_backup_with_conn, Store};
 pub const MAX_BACKUP_SIZE_BYTES: usize = 16 * 1024 * 1024;
 
 /// Highest backup schema version this build understands.
-pub const BACKUP_SCHEMA_VERSION: u32 = 2;
+pub const BACKUP_SCHEMA_VERSION: u32 = 3;
 pub const SETTINGS_BACKUP_FILENAME: &str = "pebble-settings-backup.json";
 
 fn validate_backup_schema(backup: &SettingsBackup) -> Result<()> {
@@ -157,6 +157,8 @@ pub struct SettingsBackup {
 /// Account data without passwords or auth secrets.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountBackup {
+    #[serde(default)]
+    pub account_label: Option<String>,
     pub id: String,
     pub email: String,
     pub display_name: String,
@@ -327,6 +329,7 @@ impl Store {
         let account_backups: Vec<AccountBackup> = accounts
             .into_iter()
             .map(|a| AccountBackup {
+                account_label: a.account_label,
                 id: a.id,
                 email: a.email,
                 display_name: a.display_name,
@@ -390,6 +393,7 @@ impl Store {
             // Merge account metadata: insert restored accounts, update existing
             // account display fields without touching auth_data.
             for ab in &backup.accounts {
+                let restored_label = crate::accounts::normalize_account_label(ab.account_label.as_deref())?;
                 let exists: bool = tx
                     .query_row(
                         "SELECT EXISTS(SELECT 1 FROM accounts WHERE id = ?1)",
@@ -427,13 +431,13 @@ impl Store {
                     );
                     let sync_state_json = sync_state.to_json()?;
                     tx.execute(
-                        "INSERT INTO accounts (id, email, display_name, color, provider, sync_state, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                        rusqlite::params![&ab.id, &ab.email, &ab.display_name, restored_color, provider_slug(&ab.provider), sync_state_json, now, now],
+                        "INSERT INTO accounts (id, email, display_name, color, provider, sync_state, created_at, updated_at, account_label) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                        rusqlite::params![&ab.id, &ab.email, &ab.display_name, restored_color, provider_slug(&ab.provider), sync_state_json, now, now, &restored_label],
                     ).map_err(|e| PebbleError::Storage(e.to_string()))?;
                 } else {
                     tx.execute(
-                        "UPDATE accounts SET email = ?1, display_name = ?2, color = ?3, updated_at = ?4 WHERE id = ?5",
-                        rusqlite::params![&ab.email, &ab.display_name, restored_color, pebble_core::now_timestamp(), &ab.id],
+                        "UPDATE accounts SET email = CASE WHEN provider IN ('gmail', 'outlook') THEN email ELSE ?1 END, display_name = ?2, color = ?3, updated_at = ?4, account_label = ?6 WHERE id = ?5",
+                        rusqlite::params![&ab.email, &ab.display_name, restored_color, pebble_core::now_timestamp(), &ab.id, &restored_label],
                     )
                     .map_err(|e| PebbleError::Storage(e.to_string()))?;
                 }
@@ -501,6 +505,7 @@ impl Store {
                 .map_err(|e| PebbleError::Storage(format!("Failed to begin transaction: {e}")))?;
 
             for ab in &backup.accounts {
+                let restored_label = crate::accounts::normalize_account_label(ab.account_label.as_deref())?;
                 let exists: bool = tx
                     .query_row(
                         "SELECT EXISTS(SELECT 1 FROM accounts WHERE id = ?1)",
@@ -538,13 +543,13 @@ impl Store {
                     );
                     let sync_state_json = sync_state.to_json()?;
                     tx.execute(
-                        "INSERT INTO accounts (id, email, display_name, color, provider, sync_state, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                        rusqlite::params![&ab.id, &ab.email, &ab.display_name, restored_color, provider_slug(&ab.provider), sync_state_json, now, now],
+                        "INSERT INTO accounts (id, email, display_name, color, provider, sync_state, created_at, updated_at, account_label) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                        rusqlite::params![&ab.id, &ab.email, &ab.display_name, restored_color, provider_slug(&ab.provider), sync_state_json, now, now, &restored_label],
                     ).map_err(|e| PebbleError::Storage(e.to_string()))?;
                 } else {
                     tx.execute(
-                        "UPDATE accounts SET email = ?1, display_name = ?2, color = ?3, updated_at = ?4 WHERE id = ?5",
-                        rusqlite::params![&ab.email, &ab.display_name, restored_color, pebble_core::now_timestamp(), &ab.id],
+                        "UPDATE accounts SET email = CASE WHEN provider IN ('gmail', 'outlook') THEN email ELSE ?1 END, display_name = ?2, color = ?3, updated_at = ?4, account_label = ?6 WHERE id = ?5",
+                        rusqlite::params![&ab.email, &ab.display_name, restored_color, pebble_core::now_timestamp(), &ab.id, &restored_label],
                     )
                     .map_err(|e| PebbleError::Storage(e.to_string()))?;
                 }
@@ -603,6 +608,21 @@ impl Store {
             }
 
             for auth in &private_data.auth_data {
+                let (provider, has_auth, bound_subject, has_mailbox_data): (String, bool, Option<String>, bool) = tx.query_row(
+                    "SELECT provider, auth_data IS NOT NULL, oauth_subject,
+                        EXISTS(SELECT 1 FROM messages WHERE account_id = accounts.id)
+                        OR EXISTS(SELECT 1 FROM folders WHERE account_id = accounts.id)
+                        OR COALESCE(json_extract(sync_state, '$.last_sync_cursor'), '') != ''
+                     FROM accounts WHERE id = ?1",
+                    [&auth.account_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))).optional()?.ok_or_else(|| PebbleError::Validation(format!("Backup secret references missing account: {}", auth.account_id)))?;
+                if provider != auth.provider {
+                    return Err(PebbleError::Validation("Backup authorization does not match the account provider".into()));
+                }
+                // Never replace a connected/bound OAuth mailbox with credentials from a backup.
+                // New, unbound accounts can still restore their authorization normally.
+                if matches!(provider.as_str(), "gmail" | "outlook") && (has_auth || bound_subject.is_some() || has_mailbox_data) {
+                    continue;
+                }
                 let now = pebble_core::now_timestamp();
                 let rows_affected = tx
                     .execute(
@@ -760,6 +780,8 @@ mod tests {
 
         // Create test account
         let account = Account {
+            account_label: None,
+            provider_display_name: None,
             id: new_id(),
             email: "test@example.com".to_string(),
             display_name: "Test User".to_string(),
@@ -820,7 +842,7 @@ mod tests {
         // Export
         let data = store.export_settings().unwrap();
         let backup: SettingsBackup = serde_json::from_slice(&data).unwrap();
-        assert_eq!(backup.version, 2);
+        assert_eq!(backup.version, BACKUP_SCHEMA_VERSION);
         assert_eq!(backup.accounts.len(), 1);
         assert_eq!(backup.accounts[0].email, "test@example.com");
         assert_eq!(backup.accounts[0].color.as_deref(), Some("#22c55e"));
@@ -1067,6 +1089,8 @@ mod tests {
         let now = now_timestamp();
 
         let account = Account {
+            account_label: None,
+            provider_display_name: None,
             id: "fixed-id".to_string(),
             email: "test@example.com".to_string(),
             display_name: "Test".to_string(),
@@ -1091,6 +1115,8 @@ mod tests {
         let now = now_timestamp();
 
         let account = Account {
+            account_label: None,
+            provider_display_name: None,
             id: "fixed-id".to_string(),
             email: "test@example.com".to_string(),
             display_name: "Test".to_string(),
@@ -1239,6 +1265,8 @@ mod tests {
         let now = now_timestamp();
 
         let account = Account {
+            account_label: None,
+            provider_display_name: None,
             id: new_id(),
             email: "test@example.com".to_string(),
             display_name: "Test User".to_string(),
@@ -1343,6 +1371,7 @@ mod tests {
             version: 1,
             exported_at: now,
             accounts: vec![AccountBackup {
+                account_label: None,
                 id: "gmail-account".to_string(),
                 email: "gmail@example.com".to_string(),
                 display_name: "Gmail User".to_string(),

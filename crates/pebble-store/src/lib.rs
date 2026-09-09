@@ -196,6 +196,8 @@ mod tests {
     fn test_account_crud() {
         let store = Store::open_in_memory().unwrap();
         let account = pebble_core::Account {
+            account_label: None,
+            provider_display_name: None,
             id: pebble_core::new_id(),
             email: "test@example.com".to_string(),
             display_name: "Test User".to_string(),
@@ -221,6 +223,8 @@ mod tests {
     fn test_folder_crud() {
         let store = Store::open_in_memory().unwrap();
         let account = pebble_core::Account {
+            account_label: None,
+            provider_display_name: None,
             id: pebble_core::new_id(),
             email: "test@example.com".to_string(),
             display_name: "Test".to_string(),
@@ -254,6 +258,8 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let now = pebble_core::now_timestamp();
         let account = pebble_core::Account {
+            account_label: None,
+            provider_display_name: None,
             id: pebble_core::new_id(),
             email: "test@example.com".to_string(),
             display_name: "Test".to_string(),

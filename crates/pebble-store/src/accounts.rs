@@ -4,6 +4,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::Store;
 
+pub fn normalize_account_label(label: Option<&str>) -> Result<Option<String>> {
+    let Some(label) = label else {
+        return Ok(None);
+    };
+    if label.chars().any(char::is_control) || label.chars().count() > 120 {
+        return Err(PebbleError::Validation(
+            "Account label must be at most 120 characters and contain no control characters".into(),
+        ));
+    }
+    Ok((!label.trim().is_empty()).then(|| label.trim().to_owned()))
+}
+
 /// Typed view over an account's `sync_state` JSON blob.
 ///
 /// The column itself remains a flexible JSON object on disk (so provider
@@ -85,10 +97,11 @@ fn str_to_provider(s: &str) -> ProviderType {
 
 impl Store {
     pub fn insert_account(&self, account: &Account) -> Result<()> {
+        let account_label = normalize_account_label(account.account_label.as_deref())?;
         self.with_write(|conn| {
             conn.execute(
-                "INSERT INTO accounts (id, email, display_name, color, provider, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO accounts (id, email, display_name, color, provider, created_at, updated_at, account_label, provider_display_name)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 rusqlite::params![
                     account.id,
                     account.email,
@@ -97,6 +110,8 @@ impl Store {
                     provider_to_str(&account.provider),
                     account.created_at,
                     account.updated_at,
+                    account_label,
+                    account.provider_display_name.as_deref(),
                 ],
             )?;
             Ok(())
@@ -110,12 +125,96 @@ impl Store {
         display_name: &str,
         color: Option<&str>,
     ) -> Result<()> {
+        self.update_account_fields(id, email, display_name, color, None)
+    }
+
+    pub fn update_account_details(
+        &self,
+        id: &str,
+        email: &str,
+        display_name: &str,
+        color: Option<&str>,
+        label: Option<&str>,
+    ) -> Result<()> {
+        self.update_account_fields(id, email, display_name, color, Some(label))
+    }
+
+    fn update_account_fields(
+        &self,
+        id: &str,
+        email: &str,
+        display_name: &str,
+        color: Option<&str>,
+        label: Option<Option<&str>>,
+    ) -> Result<()> {
+        let normalized_label = normalize_account_label(label.flatten())?;
         self.with_write(|conn| {
+            let (old_email, provider): (String, String) = conn.query_row(
+                "SELECT email, provider FROM accounts WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            if matches!(provider.as_str(), "gmail" | "outlook")
+                && !old_email.eq_ignore_ascii_case(email.trim())
+            {
+                return Err(PebbleError::Validation(
+                    "OAuth mailbox addresses must be changed through mailbox verification".into(),
+                ));
+            }
             let now = pebble_core::now_timestamp();
             conn.execute(
-                "UPDATE accounts SET email = ?1, display_name = ?2, color = ?3, updated_at = ?4 WHERE id = ?5",
-                rusqlite::params![email, display_name, color, now, id],
+                "UPDATE accounts SET email = ?1, display_name = ?2, color = ?3, updated_at = ?4,
+                 account_label = CASE WHEN ?6 THEN ?7 ELSE account_label END WHERE id = ?5",
+                rusqlite::params![
+                    email.trim(),
+                    display_name,
+                    color,
+                    now,
+                    id,
+                    label.is_some(),
+                    normalized_label
+                ],
             )?;
+            Ok(())
+        })
+    }
+
+    /// Bind a live OAuth identity without touching messages, credentials or user labels.
+    /// An existing subject is never silently rebound, including after backup restore.
+    pub fn apply_verified_oauth_identity(
+        &self,
+        id: &str,
+        expected_email: &str,
+        identity: &pebble_core::OAuthMailboxIdentity,
+        allow_address_change: bool,
+    ) -> Result<()> {
+        if identity.subject.trim().is_empty() || identity.email.trim().is_empty() {
+            return Err(PebbleError::Validation(
+                "Mailbox identity is incomplete".into(),
+            ));
+        }
+        self.with_write(|conn| {
+            let (email, provider, subject): (String, String, Option<String>) = conn.query_row(
+                "SELECT email, provider, oauth_subject FROM accounts WHERE id = ?1", [id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+            if !matches!(provider.as_str(), "gmail" | "outlook") || email != expected_email {
+                return Err(PebbleError::Validation("Account changed during mailbox verification. Refresh and try again.".into()));
+            }
+            if subject.as_deref().is_some_and(|old| old != identity.subject) {
+                return Err(PebbleError::Validation("The authorization belongs to a different mailbox identity. Reconnect the original account.".into()));
+            }
+            let address_changed = !email.eq_ignore_ascii_case(&identity.email);
+            if address_changed && !allow_address_change {
+                return Err(PebbleError::Validation("The saved address differs from the authorized mailbox. Verify the mailbox in account settings before sending.".into()));
+            }
+            if address_changed {
+                let duplicate: bool = conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM accounts WHERE id != ?1 AND provider = ?2 AND lower(email) = lower(?3))",
+                    rusqlite::params![id, provider, identity.email], |row| row.get(0))?;
+                if duplicate { return Err(PebbleError::Validation("This mailbox is already present in another account. No accounts were merged.".into())); }
+            }
+            conn.execute("UPDATE accounts SET email = ?1, oauth_subject = ?2, provider_display_name = ?3, updated_at = ?4 WHERE id = ?5",
+                rusqlite::params![identity.email, identity.subject, identity.display_name, pebble_core::now_timestamp(), id])?;
             Ok(())
         })
     }
@@ -124,11 +223,13 @@ impl Store {
         self.with_read(|conn| {
             let result = conn
                 .query_row(
-                    "SELECT id, email, display_name, color, provider, created_at, updated_at
+                    "SELECT id, email, display_name, color, provider, created_at, updated_at, account_label, provider_display_name
                      FROM accounts WHERE id = ?1",
                     rusqlite::params![id],
                     |row| {
                         Ok(Account {
+                            account_label: row.get(7)?,
+                            provider_display_name: row.get(8)?,
                             id: row.get(0)?,
                             email: row.get(1)?,
                             display_name: row.get(2)?,
@@ -147,11 +248,13 @@ impl Store {
     pub fn list_accounts(&self) -> Result<Vec<Account>> {
         self.with_read(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, email, display_name, color, provider, created_at, updated_at
+                "SELECT id, email, display_name, color, provider, created_at, updated_at, account_label, provider_display_name
                      FROM accounts ORDER BY created_at ASC",
             )?;
             let rows = stmt.query_map([], |row| {
                 Ok(Account {
+                    account_label: row.get(7)?,
+                    provider_display_name: row.get(8)?,
                     id: row.get(0)?,
                     email: row.get(1)?,
                     display_name: row.get(2)?,
@@ -304,8 +407,173 @@ mod cursor_tests {
     use crate::Store;
     use pebble_core::*;
 
+    #[test]
+    fn verified_mailbox_repair_preserves_account_data_and_rejects_rebinding() {
+        let store = Store::open_in_memory().unwrap();
+        let mut account = test_account();
+        account.provider = ProviderType::Outlook;
+        account.account_label = Some("公司内部".into());
+        store.insert_account(&account).unwrap();
+        store.set_auth_data(&account.id, b"original-auth").unwrap();
+        store
+            .set_sync_cursor(&account.id, "original-cursor")
+            .unwrap();
+        let mut identity = OAuthMailboxIdentity {
+            subject: "outlook:stable-a".into(),
+            email: "mailbox@outlook.com".into(),
+            display_name: Some("服务端姓名".into()),
+        };
+        assert!(store
+            .apply_verified_oauth_identity(&account.id, &account.email, &identity, false)
+            .is_err());
+        store
+            .apply_verified_oauth_identity(&account.id, &account.email, &identity, true)
+            .unwrap();
+        let repaired = store.get_account(&account.id).unwrap().unwrap();
+        assert_eq!(repaired.account_label, account.account_label);
+        assert_eq!(repaired.display_name, account.display_name);
+        assert_eq!(repaired.provider_display_name, identity.display_name);
+        assert_eq!(
+            store.get_auth_data(&account.id).unwrap().unwrap(),
+            b"original-auth"
+        );
+        assert_eq!(
+            store.get_sync_cursor(&account.id).unwrap().as_deref(),
+            Some("original-cursor")
+        );
+        identity.subject = "outlook:another-mailbox".into();
+        assert!(store
+            .apply_verified_oauth_identity(&account.id, &repaired.email, &identity, true)
+            .is_err());
+        assert_eq!(
+            store.get_account(&account.id).unwrap().unwrap().email,
+            repaired.email
+        );
+    }
+
+    #[test]
+    fn backup_restore_cannot_replace_a_connected_oauth_mailbox() {
+        use crate::cloud_sync::{RestoredAuthData, RestoredPrivateData};
+        let store = Store::open_in_memory().unwrap();
+        let mut account = test_account();
+        account.provider = ProviderType::Gmail;
+        store.insert_account(&account).unwrap();
+        store.set_auth_data(&account.id, b"original-auth").unwrap();
+        let mut backup: serde_json::Value =
+            serde_json::from_slice(&store.export_settings().unwrap()).unwrap();
+        backup["accounts"][0]["email"] = serde_json::json!("other@example.com");
+        backup["accounts"][0]["account_label"] = serde_json::json!("Restored label");
+        let bytes = serde_json::to_vec(&backup).unwrap();
+        store.import_settings(&bytes).unwrap();
+        assert_eq!(
+            store.get_account(&account.id).unwrap().unwrap().email,
+            account.email
+        );
+        store
+            .import_settings_with_private_data(
+                &bytes,
+                RestoredPrivateData {
+                    auth_data: vec![RestoredAuthData {
+                        account_id: account.id.clone(),
+                        provider: "gmail".into(),
+                        encrypted: b"different-auth".to_vec(),
+                    }],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let loaded = store.get_account(&account.id).unwrap().unwrap();
+        assert_eq!(loaded.email, account.email);
+        assert_eq!(loaded.account_label.as_deref(), Some("Restored label"));
+        assert_eq!(
+            store.get_auth_data(&account.id).unwrap().unwrap(),
+            b"original-auth"
+        );
+    }
+
+    #[test]
+    fn label_can_be_cleared_without_changing_sender_or_credentials() {
+        let store = Store::open_in_memory().unwrap();
+        let account = test_account();
+        store.insert_account(&account).unwrap();
+        store
+            .update_account_details(
+                &account.id,
+                &account.email,
+                &account.display_name,
+                None,
+                Some("  Work  "),
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .get_account(&account.id)
+                .unwrap()
+                .unwrap()
+                .account_label
+                .as_deref(),
+            Some("Work")
+        );
+        store
+            .update_account_details(
+                &account.id,
+                &account.email,
+                &account.display_name,
+                None,
+                Some("   "),
+            )
+            .unwrap();
+        let loaded = store.get_account(&account.id).unwrap().unwrap();
+        assert!(loaded.account_label.is_none());
+        assert_eq!(loaded.sender_identity().name.as_deref(), Some("Test"));
+    }
+
+    #[test]
+    fn oauth_metadata_edit_cannot_change_mailbox_address() {
+        let store = Store::open_in_memory().unwrap();
+        let mut account = test_account();
+        account.provider = ProviderType::Outlook;
+        store.insert_account(&account).unwrap();
+        assert!(store
+            .update_account(&account.id, "other@example.com", "Test", None)
+            .is_err());
+        assert_eq!(
+            store.get_account(&account.id).unwrap().unwrap().email,
+            account.email
+        );
+    }
+
+    #[test]
+    fn account_label_survives_storage_and_backup_without_changing_sender() {
+        let store = Store::open_in_memory().unwrap();
+        let mut value = serde_json::to_value(test_account()).unwrap();
+        value["account_label"] = serde_json::json!("公司内部备用");
+        let account: Account = serde_json::from_value(value).unwrap();
+        store.insert_account(&account).unwrap();
+        let loaded = store.get_account(&account.id).unwrap().unwrap();
+        assert_eq!(
+            serde_json::to_value(&loaded).unwrap()["account_label"],
+            "公司内部备用"
+        );
+        assert_eq!(loaded.display_name, "Test");
+        assert_eq!(loaded.email, "test@example.com");
+
+        let restored = Store::open_in_memory().unwrap();
+        restored
+            .import_settings(&store.export_settings().unwrap())
+            .unwrap();
+        let restored_account = restored.get_account(&account.id).unwrap().unwrap();
+        assert_eq!(
+            serde_json::to_value(&restored_account).unwrap()["account_label"],
+            "公司内部备用"
+        );
+        assert_eq!(restored_account.display_name, "Test");
+    }
+
     fn test_account() -> Account {
         Account {
+            account_label: None,
+            provider_display_name: None,
             id: new_id(),
             email: "test@example.com".to_string(),
             display_name: "Test".to_string(),
@@ -394,6 +662,8 @@ mod folder_sync_state_tests {
 
     fn test_account() -> Account {
         Account {
+            account_label: None,
+            provider_display_name: None,
             id: new_id(),
             email: "test@example.com".to_string(),
             display_name: "Test".to_string(),

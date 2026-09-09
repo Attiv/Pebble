@@ -2367,6 +2367,8 @@ mod tests {
         let store = Arc::new(Store::open_in_memory().unwrap());
         let now = now_timestamp();
         let account = pebble_core::Account {
+            account_label: None,
+            provider_display_name: None,
             id: "account-1".to_string(),
             email: "user@example.com".to_string(),
             display_name: "User".to_string(),
@@ -2648,6 +2650,8 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let now = now_timestamp();
         let account = pebble_core::Account {
+            account_label: None,
+            provider_display_name: None,
             id: "uidvalidity-account".to_string(),
             email: "uidvalidity@example.com".to_string(),
             display_name: "UIDVALIDITY".to_string(),

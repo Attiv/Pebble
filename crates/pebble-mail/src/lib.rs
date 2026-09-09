@@ -9,6 +9,7 @@ pub mod pop3_sync;
 pub mod provider;
 pub mod realtime_policy;
 pub mod reconcile;
+pub mod sender;
 pub mod smtp;
 pub mod sync;
 pub mod thread;

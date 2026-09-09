@@ -15,7 +15,6 @@ use pebble_oauth::{build_http_client, OAuthConfig, OAuthError, OAuthManager, OAu
 use pebble_store::Store;
 use std::sync::Arc;
 use tauri::State;
-use tracing::debug;
 
 async fn oauth_account_lock(
     registry: &OAuthAccountLockRegistry,
@@ -113,30 +112,144 @@ fn resolve_oauth_identity(
     ))
 }
 
-/// Fetch the user's email and display name from the OAuth provider's userinfo endpoint.
-async fn fetch_userinfo(
+fn parse_mailbox_identity(
     provider: &str,
-    access_token: &str,
-    network: &OAuthNetworkConfig,
-) -> Result<(String, String), PebbleError> {
-    let url = userinfo_url(provider)?;
+    profile: &serde_json::Value,
+) -> Result<pebble_core::OAuthMailboxIdentity, PebbleError> {
+    let subject = non_empty_json_string(profile, "id").ok_or_else(|| {
+        PebbleError::Validation("The provider did not return a stable mailbox identity".into())
+    })?;
+    // A UPN may be an external login. It is not sufficient for sending or repairing a mailbox.
+    let (email_field, _name_field) = match provider {
+        "outlook" => ("mail", "displayName"),
+        "gmail" => ("email", "name"),
+        _ => return Err(PebbleError::UnsupportedProvider(provider.into())),
+    };
+    let email = non_empty_json_string(profile, email_field).ok_or_else(|| {
+        PebbleError::Validation("The provider could not confirm the actual mailbox address. The saved account was not changed.".into())
+    })?;
+    if provider == "gmail"
+        && profile
+            .get("verified_email")
+            .and_then(serde_json::Value::as_bool)
+            == Some(false)
+    {
+        return Err(PebbleError::Validation(
+            "The mailbox address is not verified".into(),
+        ));
+    }
+    let (_, parsed_name) = parse_userinfo(provider, profile)?;
+    let identity = pebble_core::OAuthMailboxIdentity {
+        subject: format!("{provider}:{subject}"),
+        email: email.to_owned(),
+        display_name: (!parsed_name.is_empty()).then_some(parsed_name),
+    };
+    pebble_mail::sender::sender_mailbox(&pebble_core::EmailAddress {
+        name: identity.display_name.clone(),
+        address: identity.email.clone(),
+    })?;
+    Ok(identity)
+}
 
-    let client = build_http_client(network)
-        .map_err(|e| PebbleError::Network(format!("Userinfo HTTP client failed: {e}")))?;
-    let resp: serde_json::Value = client
+pub(crate) async fn fetch_mailbox_identity(
+    provider: &str,
+    auth: &ResolvedOAuthAuth,
+) -> Result<pebble_core::OAuthMailboxIdentity, PebbleError> {
+    let url = if provider == "outlook" {
+        "https://graph.microsoft.com/v1.0/me?$select=id,mail,userPrincipalName,displayName"
+    } else {
+        userinfo_url(provider)?
+    };
+    let network = OAuthNetworkConfig {
+        proxy: auth.proxy.clone(),
+    };
+    let client = build_http_client(&network)
+        .map_err(|e| PebbleError::Network(format!("Mailbox verification failed: {e}")))?;
+    let profile: serde_json::Value = client
         .get(url)
-        .bearer_auth(access_token)
+        .bearer_auth(&auth.tokens.access_token)
         .send()
         .await
-        .map_err(|e| PebbleError::Network(format!("Userinfo request failed: {e}")))?
+        .map_err(|e| PebbleError::Network(format!("Mailbox verification failed: {e}")))?
         .error_for_status()
-        .map_err(|e| PebbleError::Network(format!("Userinfo request failed: {e}")))?
+        .map_err(|e| PebbleError::Network(format!("Mailbox verification failed: {e}")))?
         .json()
         .await
-        .map_err(|e| PebbleError::Network(format!("Userinfo parse failed: {e}")))?;
+        .map_err(|e| PebbleError::Network(format!("Mailbox profile was invalid: {e}")))?;
+    parse_mailbox_identity(provider, &profile)
+}
 
-    debug!("Fetched userinfo from OAuth provider");
-    parse_userinfo(provider, &resp)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OAuthIdentityPreview {
+    pub account_id: String,
+    pub previous_email: String,
+    pub identity: pebble_core::OAuthMailboxIdentity,
+}
+
+async fn inspect_oauth_identity(
+    state: &AppState,
+    account_id: &str,
+    expected: Option<&OAuthIdentityPreview>,
+) -> Result<OAuthIdentityPreview, PebbleError> {
+    ensure_oauth_account_provider(state, account_id)?;
+    let account = state
+        .store
+        .get_account(account_id)?
+        .ok_or_else(|| PebbleError::Validation("Account not found".into()))?;
+    // Refresh before taking the lock: ensure_account_oauth_auth acquires this same lock.
+    ensure_account_oauth_auth(state, account_id, provider_slug(&account.provider)).await?;
+    let lock = oauth_account_lock(&state.oauth_account_locks, account_id).await;
+    let _guard = lock.lock().await;
+    let account = state
+        .store
+        .get_account(account_id)?
+        .ok_or_else(|| PebbleError::Validation("Account not found".into()))?;
+    let stored = read_stored_oauth_auth_data_raw(&state.crypto, &state.store, account_id)?
+        .ok_or_else(|| PebbleError::Auth("Account authorization is missing".into()))?;
+    let auth = ResolvedOAuthAuth {
+        tokens: stored.tokens(),
+        proxy: effective_oauth_proxy(&state.crypto, &state.store, &stored)?,
+    };
+    let identity = fetch_mailbox_identity(provider_slug(&account.provider), &auth).await?;
+    if let Some(expected) = expected {
+        if expected.account_id != account_id
+            || expected.previous_email != account.email
+            || expected.identity.subject != identity.subject
+            || expected.identity.email != identity.email
+        {
+            return Err(PebbleError::Validation(
+                "Mailbox details changed since the preview. Verify the mailbox again.".into(),
+            ));
+        }
+        state
+            .store
+            .apply_verified_oauth_identity(account_id, &account.email, &identity, true)?;
+    }
+    Ok(OAuthIdentityPreview {
+        account_id: account_id.into(),
+        previous_email: account.email,
+        identity,
+    })
+}
+
+#[tauri::command]
+pub async fn preview_oauth_identity(
+    state: State<'_, AppState>,
+    account_id: String,
+) -> Result<OAuthIdentityPreview, PebbleError> {
+    inspect_oauth_identity(&state, &account_id, None).await
+}
+
+#[tauri::command]
+pub async fn apply_oauth_identity(
+    state: State<'_, AppState>,
+    preview: OAuthIdentityPreview,
+) -> Result<Account, PebbleError> {
+    inspect_oauth_identity(&state, &preview.account_id, Some(&preview)).await?;
+    state
+        .store
+        .get_account(&preview.account_id)?
+        .ok_or_else(|| PebbleError::Validation("Account not found".into()))
 }
 
 fn oauth_proxy_from_parts(
@@ -686,6 +799,7 @@ pub async fn complete_oauth_flow(
     provider: String,
     email: String,
     display_name: String,
+    account_label: Option<String>,
     proxy_host: Option<String>,
     proxy_port: Option<u16>,
 ) -> std::result::Result<Account, PebbleError> {
@@ -734,19 +848,45 @@ pub async fn complete_oauth_flow(
         .await
         .map_err(|e| PebbleError::OAuth(token_exchange_error_message(&provider, &e)))?;
 
-    // Fetch user info from Google/Microsoft to get actual email and display name
-    let (final_email, final_name) = resolve_oauth_identity(
+    let identity = fetch_mailbox_identity(
+        &provider.to_lowercase(),
+        &ResolvedOAuthAuth {
+            tokens: OAuthTokens {
+                access_token: token_pair.access_token.clone(),
+                refresh_token: token_pair.refresh_token.clone(),
+                expires_at: token_pair.expires_at,
+                scopes: token_pair.scopes.clone(),
+            },
+            proxy: network.proxy.clone(),
+        },
+    )
+    .await?;
+    // Preserve the user's requested Gmail name independently from the verified provider identity.
+    let (final_email, mut final_name) = resolve_oauth_identity(
         &provider,
         &email,
         &display_name,
-        fetch_userinfo(&provider, &token_pair.access_token, &network).await,
+        Ok((
+            identity.email.clone(),
+            identity.display_name.clone().unwrap_or_default(),
+        )),
     )?;
+
+    if provider.eq_ignore_ascii_case("gmail") && !display_name.trim().is_empty() {
+        final_name = display_name.trim().to_owned();
+    }
+    pebble_mail::sender::sender_mailbox(&pebble_core::EmailAddress {
+        name: Some(final_name.clone()),
+        address: final_email.clone(),
+    })?;
 
     // Create the account
     let now = now_timestamp();
     let existing_accounts = state.store.list_accounts()?;
     let account_color = Some(default_account_color(&existing_accounts, &final_email));
     let account = Account {
+        account_label: pebble_store::accounts::normalize_account_label(account_label.as_deref())?,
+        provider_display_name: identity.display_name.clone(),
         id: new_id(),
         email: final_email,
         display_name: final_name,
@@ -760,6 +900,9 @@ pub async fn complete_oauth_flow(
 
     // If any subsequent step fails, delete the account row to prevent half-creation
     if let Err(e) = (|| -> std::result::Result<(), PebbleError> {
+        state
+            .store
+            .apply_verified_oauth_identity(&account.id, &account.email, &identity, false)?;
         // Encrypt tokens and store as auth_data
         let tokens = OAuthTokens {
             access_token: token_pair.access_token,
@@ -866,6 +1009,30 @@ pub async fn update_oauth_account_proxy_setting(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mailbox_verification_requires_stable_subject_and_actual_mail() {
+        let profile = serde_json::json!({"id":"user-a", "mail":"mailbox@outlook.com", "userPrincipalName":"login@qq.com", "displayName":"张三"});
+        let identity = parse_mailbox_identity("outlook", &profile).unwrap();
+        assert_eq!(identity.email, "mailbox@outlook.com");
+        assert_eq!(identity.subject, "outlook:user-a");
+        assert_eq!(identity.display_name.as_deref(), Some("张三"));
+        assert!(parse_mailbox_identity(
+            "outlook",
+            &serde_json::json!({"id":"user-a", "userPrincipalName":"login@qq.com"})
+        )
+        .is_err());
+        assert!(parse_mailbox_identity(
+            "outlook",
+            &serde_json::json!({"mail":"mailbox@outlook.com"})
+        )
+        .is_err());
+        assert!(parse_mailbox_identity(
+            "gmail",
+            &serde_json::json!({"id":"a", "email":"sender@example.com", "verified_email":false})
+        )
+        .is_err());
+    }
     use std::ffi::OsString;
     use std::sync::{Mutex, OnceLock};
 

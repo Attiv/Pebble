@@ -783,6 +783,8 @@ mod rule_writeback_tests {
     fn test_account() -> Account {
         let now = now_timestamp();
         Account {
+            account_label: None,
+            provider_display_name: None,
             id: new_id(),
             email: "test@example.com".to_string(),
             display_name: "Test".to_string(),

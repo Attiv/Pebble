@@ -1068,7 +1068,7 @@ fn append_body(raw: &mut String, body_text: &str, body_html: Option<&str>) {
 }
 
 fn build_raw_message(msg: &OutgoingMessage) -> Result<Vec<u8>> {
-    let mut raw = String::new();
+    let mut raw = crate::sender::from_header(&msg.from)?;
     write_common_headers(
         &mut raw,
         &msg.to,
@@ -1191,6 +1191,10 @@ fn guess_mime_type(filename: &str) -> &'static str {
 
 fn build_draft_raw(draft: &DraftMessage) -> Result<Vec<u8>> {
     let message = OutgoingMessage {
+        from: draft
+            .from
+            .clone()
+            .ok_or_else(|| PebbleError::Validation("Draft has no sender identity".into()))?,
         to: draft.to.clone(),
         cc: draft.cc.clone(),
         bcc: draft.bcc.clone(),
@@ -1549,6 +1553,10 @@ mod tests {
     #[test]
     fn test_build_raw_message() {
         let msg = OutgoingMessage {
+            from: pebble_core::EmailAddress {
+                name: Some("Sender".into()),
+                address: "sender@example.com".into(),
+            },
             to: vec![EmailAddress {
                 name: None,
                 address: "test@example.com".to_string(),
@@ -1562,6 +1570,10 @@ mod tests {
             attachment_paths: vec![],
         };
         let raw = String::from_utf8(build_raw_message(&msg).unwrap()).unwrap();
+        assert_eq!(
+            raw.lines().filter(|line| line.starts_with("From:")).count(),
+            1
+        );
         assert!(raw.contains("To: test@example.com"));
         assert!(raw.contains("Subject: Test Subject"));
         assert!(raw.contains("Hello"));
@@ -1572,6 +1584,10 @@ mod tests {
     #[test]
     fn build_raw_message_rejects_crlf_header_injection() {
         let msg = OutgoingMessage {
+            from: pebble_core::EmailAddress {
+                name: Some("Sender".into()),
+                address: "sender@example.com".into(),
+            },
             to: vec![EmailAddress {
                 name: Some("Alice\r\nBcc: victim@example.com".to_string()),
                 address: "alice@example.com".to_string(),
@@ -1591,6 +1607,10 @@ mod tests {
     #[test]
     fn build_raw_message_rejects_crlf_attachment_filename() {
         let msg = OutgoingMessage {
+            from: pebble_core::EmailAddress {
+                name: Some("Sender".into()),
+                address: "sender@example.com".into(),
+            },
             to: vec![EmailAddress {
                 name: None,
                 address: "alice@example.com".to_string(),
@@ -1614,6 +1634,10 @@ mod tests {
         let attachment = base.join("报价单.pdf");
         std::fs::write(&attachment, b"payload").unwrap();
         let msg = OutgoingMessage {
+            from: pebble_core::EmailAddress {
+                name: Some("Sender".into()),
+                address: "sender@example.com".into(),
+            },
             to: vec![EmailAddress {
                 name: None,
                 address: "alice@example.com".to_string(),
@@ -1638,6 +1662,10 @@ mod tests {
     #[test]
     fn build_raw_message_uses_per_message_boundary() {
         let msg = OutgoingMessage {
+            from: pebble_core::EmailAddress {
+                name: Some("Sender".into()),
+                address: "sender@example.com".into(),
+            },
             to: vec![EmailAddress {
                 name: None,
                 address: "alice@example.com".to_string(),
@@ -1662,6 +1690,10 @@ mod tests {
     #[test]
     fn test_build_raw_message_with_cc_and_reply() {
         let msg = OutgoingMessage {
+            from: pebble_core::EmailAddress {
+                name: Some("Sender".into()),
+                address: "sender@example.com".into(),
+            },
             to: vec![EmailAddress {
                 name: Some("Alice".to_string()),
                 address: "alice@example.com".to_string(),
@@ -1685,6 +1717,10 @@ mod tests {
     #[test]
     fn test_build_raw_message_with_bcc_and_html_body() {
         let msg = OutgoingMessage {
+            from: pebble_core::EmailAddress {
+                name: Some("Sender".into()),
+                address: "sender@example.com".into(),
+            },
             to: vec![EmailAddress {
                 name: None,
                 address: "alice@example.com".to_string(),
@@ -1714,6 +1750,10 @@ mod tests {
         std::fs::write(&path, b"hello").unwrap();
         let path_string = path.to_string_lossy().into_owned();
         let draft = DraftMessage {
+            from: Some(EmailAddress {
+                name: Some("张三".into()),
+                address: "sender@example.com".into(),
+            }),
             id: None,
             to: vec![EmailAddress {
                 name: None,

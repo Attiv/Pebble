@@ -85,6 +85,7 @@ export default function AccountSetup({ onClose }: Props) {
   const initialForm: AddAccountRequest = {
     email: "",
     display_name: "",
+    account_label: "",
     provider: "imap",
     imap_host: "",
     imap_port: 993,
@@ -217,6 +218,7 @@ export default function AccountSetup({ onClose }: Props) {
         form.display_name || "",
         form.proxy_host?.trim() || undefined,
         form.proxy_port,
+        form.account_label || undefined,
       );
       await queryClient.invalidateQueries({ queryKey: accountsQueryKey });
       await startSync(account.id, syncPollInterval);
@@ -410,6 +412,12 @@ export default function AccountSetup({ onClose }: Props) {
 
         {/* Scrollable body */}
         <div className="scroll-region account-setup-scroll" style={{ overflowY: "auto", padding: "20px" }}>
+          <div style={{ ...fieldStyle, marginBottom: "16px" }}>
+            <label htmlFor="setup-account-label" style={labelStyle}>{t("accountSetup.accountLabel", "Account label")}</label>
+            <input id="setup-account-label" style={inputStyle} type="text" maxLength={120}
+              value={form.account_label || ""} onChange={(e) => handleChange("account_label", e.target.value)} />
+            <small>{t("accountSetup.accountLabelHelp", "Only used to identify this account in Pebble; never sent as your sender name.")}</small>
+          </div>
           {/* OAuth sign-in buttons */}
           <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
             <button
@@ -514,14 +522,13 @@ export default function AccountSetup({ onClose }: Props) {
 
             {/* Display name */}
             <div style={fieldStyle}>
-              <label htmlFor="setup-display-name" style={labelStyle}>{t("accountSetup.displayName", "Display name")}</label>
+              <label htmlFor="setup-display-name" style={labelStyle}>{t("accountSetup.displayName", "Sender name")}</label>
               <input
                 id="setup-display-name"
                 name="display_name"
                 autoComplete="name"
                 style={inputStyle}
                 type="text"
-                required
                 value={form.display_name}
                 onChange={(e) => handleChange("display_name", e.target.value)}
                 placeholder={t("accountSetup.namePlaceholder", "Your Name")}

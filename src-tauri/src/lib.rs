@@ -577,6 +577,8 @@ pub fn run() {
             commands::threads::list_thread_messages,
             commands::threads::list_threads,
             commands::oauth::complete_oauth_flow,
+            commands::oauth::preview_oauth_identity,
+            commands::oauth::apply_oauth_identity,
             commands::oauth::get_oauth_account_proxy,
             commands::oauth::get_oauth_account_proxy_setting,
             commands::oauth::update_oauth_account_proxy,

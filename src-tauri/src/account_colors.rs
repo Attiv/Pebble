@@ -42,6 +42,8 @@ mod tests {
     fn account(id: &str, color: Option<&str>) -> Account {
         let now = now_timestamp();
         Account {
+            account_label: None,
+            provider_display_name: None,
             id: id.to_string(),
             email: format!("{id}@example.com"),
             display_name: id.to_string(),

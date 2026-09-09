@@ -8,6 +8,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Added independent local account labels, visible alongside mailbox addresses, with v3 backup support and imports from v1/v2 backups (#79).
+- Added OAuth mailbox verification and an in-place repair preview that preserves existing messages, user names, labels and account IDs (#78, #79).
+- Added a one-time sender-name notice with a preview and a shortcut to account settings (#77).
 - Added a local address book with searchable contacts, multiple labeled email addresses, favorites, notes, and quick create/edit actions from message participants (#81).
 - Added recipient suggestions that prioritize saved contacts while retaining recent correspondents, with controls to suppress unwanted recent addresses (#81).
 - Added standards-compatible vCard import and export with duplicate merging, partial-error reporting, UTF-8/folded-line support, and safe file/card limits (#81).
@@ -16,6 +19,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 
 - Fixed partial Outlook sync updates clearing message subjects, bodies, metadata, and attachments after read or flag changes (#90).
+- Fixed SMTP and Gmail dropping configured sender names. Structured From headers now support Unicode and punctuation, and outgoing retries preserve the stored sender identity (#77).
+- Outlook now clearly shows its provider-managed sender name; changing a local label does not change the external identity. New OAuth accounts bind to a verified provider identity, and OAuth addresses cannot be changed through ordinary account editing (#77, #79).
+- Settings restore preserves existing OAuth mailbox addresses and connected credentials instead of silently replacing them with another mailbox from a backup.
+- Fixed copied-text feedback leaving a timer running after its popover was closed.
+
+### Upgrade notes
+
+- Review existing sender names before sending: the old “Display name” setting is now included in SMTP/Gmail outgoing mail. Use the separate “Account label” for internal descriptions. Previously delivered messages are unchanged.
+- Queued messages retain their original identity. Messages with missing or incompatible identities stop automatic retries and remain visible for review; unknown send outcomes are never automatically resent.
+- Outlook sender names remain controlled by the mailbox service. This change does not enable aliases or delegated sending, and recipient address books may affect how names appear.
+- New backups use schema v3. Upgrade other clients before importing them. Existing OAuth connections are preserved during restore; a new account can still restore its saved credentials. Settings backups do not include message bodies or attachments.
 
 ## [0.1.4] - 2026-08-08
 

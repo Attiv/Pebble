@@ -133,8 +133,9 @@ export async function completeOAuthFlow(
   displayName: string,
   proxyHost?: string,
   proxyPort?: number,
+  accountLabel?: string,
 ): Promise<Account> {
-  return invoke<Account>("complete_oauth_flow", { provider, email, displayName, proxyHost, proxyPort });
+  return invoke<Account>("complete_oauth_flow", { provider, email, displayName, proxyHost, proxyPort, accountLabel });
 }
 
 export async function getOAuthAccountProxy(accountId: string): Promise<HttpProxyConfig | null> {
@@ -243,11 +244,12 @@ export async function updateAccount(
   proxyHost?: string,
   proxyPort?: number,
   accountColor?: string,
+  accountLabel?: string,
 ): Promise<void> {
   return invoke<void>("update_account", {
     accountId, email, displayName, password,
     imapHost, imapPort, smtpHost, smtpPort, imapSecurity, smtpSecurity,
-    acceptInvalidCerts, proxyHost, proxyPort, accountColor,
+    acceptInvalidCerts, proxyHost, proxyPort, accountColor, accountLabel,
   });
 }
 
@@ -809,4 +811,16 @@ export async function getAutostartEnabled(): Promise<boolean> {
 /** Enable or disable launching Pebble when the user logs in. */
 export async function setAutostartEnabled(enabled: boolean): Promise<void> {
   return invoke<void>("set_autostart_enabled", { enabled });
+}
+
+export interface OAuthIdentityPreview {
+  account_id: string;
+  previous_email: string;
+  identity: { subject: string; email: string; display_name: string | null };
+}
+export function previewOAuthIdentity(accountId: string): Promise<OAuthIdentityPreview> {
+  return invoke("preview_oauth_identity", { accountId });
+}
+export function applyOAuthIdentity(preview: OAuthIdentityPreview): Promise<Account> {
+  return invoke("apply_oauth_identity", { preview });
 }

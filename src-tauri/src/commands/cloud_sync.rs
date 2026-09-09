@@ -226,7 +226,7 @@ fn restore_backup_data(
         .import_settings_with_private_data(data, private_data)?;
     if restored_secrets {
         return Ok(
-            "Settings backup restored with account passwords, OAuth tokens, and API keys."
+            "Settings backup restored with saved credentials. Existing OAuth connections and mailboxes with local data were preserved."
                 .to_string(),
         );
     }

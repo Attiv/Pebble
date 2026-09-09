@@ -1,3 +1,4 @@
+import { senderIdentityLabel } from "@/lib/accountIdentity";
 import { useState, useEffect, useRef } from "react";
 import { EditorContent } from "@tiptap/react";
 import {
@@ -508,7 +509,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
       <div className="scroll-region compose-scroll" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "auto" }}>
         <div className="compose-form-shell">
           {/* From */}
-          {accounts.length > 1 && (
+          {accounts.length > 0 && (
             <div style={composeStyles.fieldRow}>
               <label htmlFor="compose-from-account" style={composeStyles.fieldLabel}>
                 {t("compose.from", "From")}
@@ -526,11 +527,17 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
               >
                 {accounts.map((acc) => (
                   <option key={acc.id} value={acc.id}>
-                    {acc.display_name ? `${acc.display_name} <${acc.email}>` : acc.email}
+                    {senderIdentityLabel(acc)}{acc.account_label?.trim() ? ` · ${acc.account_label.trim()}` : ""}
                   </option>
                 ))}
               </select>
             </div>
+          )}
+
+          {accounts.find((acc) => acc.id === fromAccountId)?.provider === "outlook" && (
+            <p style={{ margin: "0 0 8px", fontSize: "12px", color: "var(--color-text-secondary)" }}>
+              {t("accountSetup.providerManagedName", "The sender name is managed by your email provider.")}
+            </p>
           )}
 
           {/* To */}

@@ -1,3 +1,5 @@
+import { accountLabel } from "@/lib/accountIdentity";
+import OAuthIdentityPanel from "./OAuthIdentityPanel";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Trash2, Mail, Pencil, Plug, RefreshCw } from "lucide-react";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -190,7 +192,7 @@ export default function AccountsTab() {
                       }}
                     />
                     <span style={{ fontSize: "13px", fontWeight: 500 }}>
-                      {account.display_name}
+                      {accountLabel(account)}
                     </span>
                   </div>
                   <span
@@ -404,6 +406,8 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
   const dialogRef = useRef<HTMLDivElement>(null);
   const emailInputRef = useRef<HTMLInputElement>(null);
   const [displayName, setDisplayName] = useState(account.display_name);
+  const [accountLabelValue, setAccountLabelValue] = useState(account.account_label || "");
+  const [providerName, setProviderName] = useState(account.provider_display_name || "");
   const [email, setEmail] = useState(account.email);
   const [accountColor, setAccountColor] = useState(initialColor);
   const [password, setPassword] = useState("");
@@ -537,6 +541,7 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
           undefined,
           undefined,
           accountColor,
+          accountLabelValue,
         );
         const trimmedProxyHost = proxyHost.trim();
         const trimmedProxyPort = proxyPort.trim();
@@ -568,6 +573,7 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
           proxyHost.trim() || undefined,
           proxyPort ? parseInt(proxyPort, 10) : undefined,
           accountColor,
+          accountLabelValue,
         );
       }
 
@@ -671,13 +677,27 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
         <div className="scroll-region edit-account-scroll" style={{ overflowY: "auto", padding: "20px" }}>
           <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
             <div style={fieldStyle}>
+              <label style={labelStyle}>{t("accountSetup.accountLabel", "Account label")}</label>
+              <input aria-label={t("accountSetup.accountLabel", "Account label")} style={inputStyle} maxLength={120}
+                value={accountLabelValue} onChange={(e) => setAccountLabelValue(e.target.value)} />
+              <small>{t("accountSetup.accountLabelHelp", "Only used to identify this account in Pebble; never sent as your sender name.")}</small>
+            </div>
+            <div>
               <label style={labelStyle}>{t("accountSetup.displayName")}</label>
-              <input aria-label={t("accountSetup.displayName")} style={inputStyle} type="text" required value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+              <input aria-label={t("accountSetup.displayName")} style={inputStyle} type="text" readOnly={account.provider === "outlook"} value={account.provider === "outlook" ? providerName : displayName} onChange={(e) => setDisplayName(e.target.value)} />
+              <small>{account.provider === "outlook"
+                ? t("accountSetup.providerManagedName", "The sender name is managed by your email provider.")
+                : t("accountSetup.senderNameHelp", "Used in outgoing messages. Check this name before sending.")}</small>
             </div>
             <div style={fieldStyle}>
               <label style={labelStyle}>{t("accountSetup.emailAddress")}</label>
-              <input aria-label={t("accountSetup.emailAddress")} ref={emailInputRef} style={inputStyle} type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+              <input aria-label={t("accountSetup.emailAddress")} ref={emailInputRef} style={inputStyle} type="email" required readOnly={isOAuth} value={email} onChange={(e) => setEmail(e.target.value)} />
             </div>
+            {isOAuth && <OAuthIdentityPanel account={account} onApplied={(updated) => {
+              setEmail(updated.email);
+              setProviderName(updated.provider_display_name || "");
+              void queryClient.invalidateQueries({ queryKey: accountsQueryKey });
+            }} />}
             <div style={fieldStyle}>
               <label htmlFor="account-color" style={labelStyle}>{t("settings.accountColor", "Account color")}</label>
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>

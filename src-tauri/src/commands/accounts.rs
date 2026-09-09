@@ -277,6 +277,8 @@ fn validate_account_color(color: Option<&str>) -> std::result::Result<(), Pebble
 #[allow(dead_code)]
 #[derive(Deserialize)]
 pub struct AddAccountRequest {
+    #[serde(default)]
+    pub account_label: Option<String>,
     pub email: String,
     pub display_name: String,
     pub provider: String,
@@ -325,6 +327,10 @@ pub async fn add_account(
     request: AddAccountRequest,
 ) -> std::result::Result<Account, PebbleError> {
     let now = now_timestamp();
+    pebble_mail::sender::sender_mailbox(&pebble_core::EmailAddress {
+        name: Some(request.display_name.clone()),
+        address: request.email.clone(),
+    })?;
     let provider = match request.provider.to_lowercase().as_str() {
         "gmail" => ProviderType::Gmail,
         "outlook" => ProviderType::Outlook,
@@ -352,6 +358,10 @@ pub async fn add_account(
 
     let existing_accounts = state.store.list_accounts()?;
     let account = Account {
+        account_label: pebble_store::accounts::normalize_account_label(
+            request.account_label.as_deref(),
+        )?,
+        provider_display_name: None,
         id: new_id(),
         email: request.email.clone(),
         display_name: request.display_name.clone(),
@@ -449,8 +459,14 @@ pub async fn update_account(
     proxy_host: Option<String>,
     proxy_port: Option<u16>,
     account_color: Option<String>,
+    account_label: Option<String>,
 ) -> std::result::Result<(), PebbleError> {
     validate_account_color(account_color.as_deref())?;
+    pebble_mail::sender::sender_mailbox(&pebble_core::EmailAddress {
+        name: Some(display_name.clone()),
+        address: email.clone(),
+    })?;
+    pebble_store::accounts::normalize_account_label(account_label.as_deref())?;
 
     let credentials_dirty = password.is_some()
         || imap_host.is_some()
@@ -463,9 +479,13 @@ pub async fn update_account(
         || proxy_host.is_some()
         || proxy_port.is_some();
     if !credentials_dirty {
-        state
-            .store
-            .update_account(&account_id, &email, &display_name, account_color.as_deref())?;
+        state.store.update_account_details(
+            &account_id,
+            &email,
+            &display_name,
+            account_color.as_deref(),
+            account_label.as_deref(),
+        )?;
         return Ok(());
     }
 
@@ -585,9 +605,13 @@ pub async fn update_account(
         creds.allow_plaintext,
     )?;
 
-    state
-        .store
-        .update_account(&account_id, &email, &display_name, account_color.as_deref())?;
+    state.store.update_account_details(
+        &account_id,
+        &email,
+        &display_name,
+        account_color.as_deref(),
+        account_label.as_deref(),
+    )?;
 
     let config_bytes = serialize_account_credentials(&creds)?;
     store_account_auth_data(&state.crypto, &state.store, &account_id, &config_bytes)?;
