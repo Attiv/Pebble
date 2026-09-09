@@ -1492,7 +1492,7 @@ pub(crate) fn base64_standard_decode_outlook(input: &str) -> Result<Vec<u8>> {
     }
 
     let mut out = Vec::with_capacity(bytes.len() / 4 * 3 - padding);
-    for (chunk_index, chunk) in bytes.chunks_exact(4).enumerate() {
+    for (chunk_index, chunk) in bytes.as_chunks::<4>().0.iter().enumerate() {
         let is_last = chunk_index + 1 == bytes.len() / 4;
         let chunk_padding = if is_last { padding } else { 0 };
         let a = sextet(chunk[0]);
