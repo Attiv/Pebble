@@ -17,7 +17,9 @@ fn hex_decode(s: &str) -> std::result::Result<Vec<u8>, PebbleError> {
         ));
     }
     bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let high = hex_nibble(pair[0])
                 .ok_or_else(|| PebbleError::Internal("Invalid hex digit".to_string()))?;
