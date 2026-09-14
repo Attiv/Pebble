@@ -576,7 +576,11 @@ impl Default for SyncConfig {
         Self {
             poll_interval_secs: 15,
             reconcile_interval_secs: 900,
-            initial_fetch_limit: 200,
+            // Every message in a batch is fetched with BODY.PEEK[], and the
+            // whole batch shares one 45s command timeout. 200 full bodies do
+            // not arrive in time over a slow or long-haul link, which fails the
+            // initial sync outright; 50 leaves comfortable headroom.
+            initial_fetch_limit: 50,
         }
     }
 }
