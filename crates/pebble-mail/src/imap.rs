@@ -67,8 +67,37 @@ pub fn looks_like_access_token(password: &str) -> bool {
 macro_rules! imap_login {
     ($client:expr, $cfg:expr) => {{
         let cfg = $cfg;
-        let client = $client;
+        let mut client = $client;
         if looks_like_access_token(&cfg.password) {
+            // The server greeting has not been read yet at this point — every
+            // connect path hands it to `Client` unread, either straight from the
+            // socket or replayed through `PrefixedStream`.
+            //
+            // `login` copes with that because it skips untagged responses on its
+            // way to the tagged one. `authenticate` does not: it treats the first
+            // response it reads as the SASL continuation, so the greeting sends it
+            // down the "command finished" branch to wait for a tagged response
+            // while the server waits for our payload — a deadlock that surfaces
+            // only as a command timeout. Consume the greeting first.
+            match tokio::time::timeout(
+                Duration::from_secs(IMAP_COMMAND_TIMEOUT_SECS),
+                client.read_response(),
+            )
+            .await
+            {
+                Ok(Some(Ok(_))) => Ok(()),
+                Ok(Some(Err(e))) => Err(PebbleError::Network(format!(
+                    "IMAP greeting failed: {e}"
+                ))),
+                Ok(None) => Err(PebbleError::Network(
+                    "IMAP connection closed before greeting".into(),
+                )),
+                Err(_) => Err(imap_timeout_error(
+                    "IMAP greeting",
+                    IMAP_COMMAND_TIMEOUT_SECS,
+                )),
+            }?;
+
             let auth = XOAuth2 {
                 user: cfg.username.clone(),
                 token: cfg.password.clone(),
