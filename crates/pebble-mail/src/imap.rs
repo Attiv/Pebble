@@ -86,9 +86,7 @@ macro_rules! imap_login {
             .await
             {
                 Ok(Some(Ok(_))) => Ok(()),
-                Ok(Some(Err(e))) => Err(PebbleError::Network(format!(
-                    "IMAP greeting failed: {e}"
-                ))),
+                Ok(Some(Err(e))) => Err(PebbleError::Network(format!("IMAP greeting failed: {e}"))),
                 Ok(None) => Err(PebbleError::Network(
                     "IMAP connection closed before greeting".into(),
                 )),

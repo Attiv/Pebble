@@ -157,7 +157,13 @@ impl SmtpSender {
                         )
                         .await
                         .map_err(|e| PebbleError::Network(format!("SMTP handshake failed: {e}")))?;
-                        authenticate_and_send(&mut conn, &self.credentials, self.mechanisms(), email).await?;
+                        authenticate_and_send(
+                            &mut conn,
+                            &self.credentials,
+                            self.mechanisms(),
+                            email,
+                        )
+                        .await?;
                     }
                     Err(rustls_err) => {
                         tracing::debug!(
@@ -189,7 +195,13 @@ impl SmtpSender {
                         )
                         .await
                         .map_err(|e| PebbleError::Network(format!("SMTP handshake failed: {e}")))?;
-                        authenticate_and_send(&mut conn, &self.credentials, self.mechanisms(), email).await?;
+                        authenticate_and_send(
+                            &mut conn,
+                            &self.credentials,
+                            self.mechanisms(),
+                            email,
+                        )
+                        .await?;
                     }
                 }
             }
@@ -216,7 +228,8 @@ impl SmtpSender {
                     .await
                     .map_err(|e| PebbleError::Network(format!("STARTTLS failed: {e}")))?;
 
-                authenticate_and_send(&mut conn, &self.credentials, self.mechanisms(), email).await?;
+                authenticate_and_send(&mut conn, &self.credentials, self.mechanisms(), email)
+                    .await?;
             }
             ConnectionSecurity::Plain => {
                 let socks_stream =
@@ -231,7 +244,8 @@ impl SmtpSender {
                 .await
                 .map_err(|e| PebbleError::Network(format!("SMTP handshake failed: {e}")))?;
 
-                authenticate_and_send(&mut conn, &self.credentials, self.mechanisms(), email).await?;
+                authenticate_and_send(&mut conn, &self.credentials, self.mechanisms(), email)
+                    .await?;
             }
         }
 
