@@ -35,8 +35,22 @@ pub(crate) struct XOAuth2 {
 impl async_imap::Authenticator for XOAuth2 {
     type Response = String;
 
-    fn process(&mut self, _challenge: &[u8]) -> Self::Response {
-        format!("user={}\x01auth=Bearer {}\x01\x01", self.user, self.token)
+    fn process(&mut self, challenge: &[u8]) -> Self::Response {
+        // An empty challenge is the server asking for the SASL payload.
+        //
+        // A non-empty one means authentication failed and the challenge carries
+        // the error as JSON. The protocol requires an empty response to close
+        // the exchange; without one the server just waits and the whole command
+        // hits its timeout, hiding the real error behind "timed out".
+        if challenge.is_empty() {
+            format!("user={}\x01auth=Bearer {}\x01\x01", self.user, self.token)
+        } else {
+            debug!(
+                "IMAP XOAUTH2 rejected by server: {}",
+                String::from_utf8_lossy(challenge)
+            );
+            String::new()
+        }
     }
 }
 
