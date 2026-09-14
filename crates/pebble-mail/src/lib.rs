@@ -15,7 +15,9 @@ pub mod sync;
 pub mod thread;
 
 pub use gmail_sync::GmailSyncWorker;
-pub use imap::{ConnectionSecurity, ImapConfig, ImapProvider, ProxyConfig, SmtpConfig};
+pub use imap::{
+    AccessTokenRefresher, ConnectionSecurity, ImapConfig, ImapProvider, ProxyConfig, SmtpConfig,
+};
 pub use outlook_sync::OutlookSyncWorker;
 pub use pop3::{Pop3Config, Pop3MessageRef, Pop3Provider};
 pub use pop3_sync::Pop3SyncWorker;

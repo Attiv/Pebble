@@ -24,10 +24,21 @@ impl ImapMailProvider {
         &self.inner
     }
 
+    /// Attach a refresher so XOAUTH2 accounts get a current access token on
+    /// every reconnect, not just the one captured at startup.
+    pub fn with_token_refresher(mut self, refresher: crate::imap::AccessTokenRefresher) -> Self {
+        self.inner = self.inner.with_token_refresher(refresher);
+        self
+    }
+
     /// Create a second provider with the same config, for use as a dedicated IDLE connection.
     pub fn clone_for_idle(&self) -> Self {
+        let mut inner = ImapProvider::new(self.inner.config());
+        if let Some(refresher) = self.inner.token_refresher() {
+            inner = inner.with_token_refresher(refresher);
+        }
         Self {
-            inner: ImapProvider::new(self.inner.config()),
+            inner,
             account_id: self.account_id.clone(),
         }
     }

@@ -450,9 +450,20 @@ pub struct ImapMailboxStatus {
 }
 
 /// An IMAP provider that manages a connection and session.
+/// Produces a fresh OAuth2 access token for an XOAUTH2 account.
+///
+/// A sync worker can stay connected for longer than an access token lives, so
+/// the token captured when the worker started is stale by the time it
+/// reconnects. Providers call this before every connect to get a current one.
+pub type AccessTokenRefresher =
+    Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Result<String>> + Send>> + Send + Sync>;
+
 pub struct ImapProvider {
     config: ImapConfig,
     session: Arc<Mutex<Option<ImapSession>>>,
+    token_refresher: Option<AccessTokenRefresher>,
+    /// Overrides `config.password` once the refresher has produced a token.
+    access_token: Arc<Mutex<Option<String>>>,
 }
 
 /// Build a rustls TLS connector with bundled root certificates.
@@ -609,12 +620,45 @@ impl ImapProvider {
         Self {
             config,
             session: Arc::new(Mutex::new(None)),
+            token_refresher: None,
+            access_token: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Refresh the access token before every connect, for XOAUTH2 accounts.
+    pub fn with_token_refresher(mut self, refresher: AccessTokenRefresher) -> Self {
+        self.token_refresher = Some(refresher);
+        self
+    }
+
+    /// The refresher attached to this provider, if any.
+    pub fn token_refresher(&self) -> Option<AccessTokenRefresher> {
+        self.token_refresher.clone()
     }
 
     /// Return a clone of the connection configuration.
     pub fn config(&self) -> ImapConfig {
         self.config.clone()
+    }
+
+    /// Ask the refresher for a current access token, if one is attached.
+    async fn refresh_access_token(&self) -> Result<()> {
+        let Some(refresher) = self.token_refresher.as_ref() else {
+            return Ok(());
+        };
+        let token = refresher().await?;
+        *self.access_token.lock().await = Some(token);
+        Ok(())
+    }
+
+    /// The connection config with the freshest access token in place of the
+    /// stored password. Identical to `config` when no refresher is attached.
+    async fn auth_config(&self) -> ImapConfig {
+        let mut config = self.config.clone();
+        if let Some(token) = self.access_token.lock().await.clone() {
+            config.password = token;
+        }
+        config
     }
 
     /// Whether this host requires an RFC 2971 ID command before LOGIN
@@ -793,7 +837,8 @@ impl ImapProvider {
         // Replay the original greeting so Client::new() is happy
         let stream = PrefixedStream::with_prefix(greeting, inner);
         let client = Client::new(stream);
-        imap_login!(client, &self.config)
+        let auth_config = self.auth_config().await;
+        imap_login!(client, &auth_config)
     }
 
     /// Establish a TCP connection, optionally through a SOCKS5 proxy.
@@ -839,6 +884,8 @@ impl ImapProvider {
 
     /// Connect to the IMAP server and log in.
     pub async fn connect(&self) -> Result<()> {
+        self.refresh_access_token().await?;
+        let auth_config = self.auth_config().await;
         let tcp = self.tcp_connect().await?;
 
         let needs_id = self.needs_id_command();
@@ -885,7 +932,7 @@ impl ImapProvider {
                 let stream = PrefixedStream::with_prefix(prefix, inner);
 
                 let client = Client::new(stream);
-                imap_login!(client, &self.config)?
+                imap_login!(client, &auth_config)?
             }
             ConnectionSecurity::StartTls => {
                 // Connect plain, read greeting, optionally send ID, STARTTLS, upgrade TLS.
@@ -919,7 +966,7 @@ impl ImapProvider {
                 let stream = PrefixedStream::with_prefix(prefix, InnerStream::Plain(tcp));
 
                 let client = Client::new(stream);
-                imap_login!(client, &self.config)?
+                imap_login!(client, &auth_config)?
             }
         };
 
