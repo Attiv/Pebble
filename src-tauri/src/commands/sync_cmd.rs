@@ -168,6 +168,24 @@ async fn start_sync_inner(
     let account_id_for_progress = account_id.clone();
     let account_id_clone = account_id.clone();
 
+    // Renew the IMAP access token before the provider reads its config, so the
+    // task starts with a usable one. Shares the placeholder cleanup below: a
+    // failure here must not leave the account wedged in "starting".
+    if let Err(e) = crate::commands::xoauth2::ensure_fresh_xoauth2(
+        &state.crypto,
+        &state.store,
+        &account_id,
+        None,
+    )
+    .await
+    {
+        let mut handles = state.sync_handles.lock().await;
+        if let Some(handle) = handles.remove(&account_id) {
+            handle.task.abort();
+        }
+        return Err(e);
+    }
+
     // Build the provider-specific task. If this fails (e.g. token decode error,
     // IMAP config parse error), remove the placeholder so the account can retry.
     let task = match build_sync_task(
@@ -589,13 +607,6 @@ fn build_sync_task(
         }
         ProviderType::Imap => {
             // --- IMAP path ---
-            crate::commands::xoauth2::ensure_fresh_xoauth2(
-                &state.crypto,
-                &state.store,
-                &account_id_clone,
-                None,
-            )
-            .await?;
             let imap_config = match crate::commands::messages::load_imap_config(
                 &state.store,
                 &state.crypto,
