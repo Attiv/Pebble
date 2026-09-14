@@ -41,3 +41,4 @@ pnpm-debug.log
 
 # Claude Code
 .claude/
+pnpm-workspace.yaml
