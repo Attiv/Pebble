@@ -35,7 +35,7 @@ pub(crate) struct XOAuth2 {
 impl async_imap::Authenticator for XOAuth2 {
     type Response = String;
 
-    fn process(&self, _challenge: &[u8]) -> Self::Response {
+    fn process(&mut self, _challenge: &[u8]) -> Self::Response {
         format!("user={}\x01auth=Bearer {}\x01\x01", self.user, self.token)
     }
 }
@@ -61,7 +61,7 @@ macro_rules! imap_login {
             };
             tokio::time::timeout(
                 Duration::from_secs(IMAP_COMMAND_TIMEOUT_SECS),
-                client.authenticate("XOAUTH2", &auth),
+                client.authenticate("XOAUTH2", auth),
             )
             .await
             .map_err(|_| imap_timeout_error("IMAP XOAUTH2", IMAP_COMMAND_TIMEOUT_SECS))?
