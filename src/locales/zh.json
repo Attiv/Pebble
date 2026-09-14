@@ -484,6 +484,7 @@
     "contextNoteFailed": "加入看板备注失败"
   },
   "accountSetup": {
+    "accountAddedTokenFailed": "账号已添加，但 OAuth2 令牌验证失败：{{error}}。可在“设置 → 账号”中重试。",
     "title": "添加邮箱账户",
     "quickSetup": "快速设置",
     "emailAddress": "邮箱地址",
@@ -792,5 +793,27 @@
     "body": "邮件正文",
     "to": "收件人：",
     "cc": "抄送："
+  },
+  "xoauth2": {
+    "sectionTitle": "IMAP OAuth2 登录（XOAUTH2）",
+    "enable": "使用 OAuth2 令牌登录 IMAP（XOAUTH2）",
+    "enableHint": "Microsoft 365 已停用 IMAP 的基本身份验证，收信需要令牌。上面的密码仍用于 SMTP 发信。",
+    "description": "用 OAuth2 令牌代替密码登录 IMAP。Microsoft 365 已停用 IMAP 的基本身份验证，必须使用此方式。SMTP 密码不受影响。",
+    "tenant": "租户 ID",
+    "tenantHint": "组织的目录 ID；个人账号填 common。",
+    "clientId": "应用程序（客户端）ID",
+    "refreshToken": "刷新令牌",
+    "refreshTokenHint": "Pebble 会在每次连接前用它换取新的访问令牌，无需再手动粘贴。",
+    "clientSecret": "客户端密钥（可选）",
+    "clientSecretHint": "仅当应用注册为机密客户端时才需要填写。",
+    "save": "保存并验证令牌",
+    "saving": "验证中…",
+    "saved": "令牌验证通过，下次同步起 IMAP 将使用它。",
+    "statusImapToken": "IMAP：使用 OAuth2 令牌登录",
+    "statusImapPassword": "IMAP：使用密码登录",
+    "statusSmtpToken": "SMTP：使用 OAuth2 令牌登录",
+    "statusSmtpPassword": "SMTP：使用密码登录",
+    "statusExpiresIn": "约 {{minutes}} 分钟后自动续期",
+    "statusRenewsNextSync": "下次同步时自动续期"
   }
 }

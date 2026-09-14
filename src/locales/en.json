@@ -484,6 +484,7 @@
     "contextNoteFailed": "Failed to add Kanban note"
   },
   "accountSetup": {
+    "accountAddedTokenFailed": "Account added, but the OAuth2 token could not be verified: {{error}}. You can retry in Settings \u2192 Accounts.",
     "title": "Add Email Account",
     "quickSetup": "Quick setup",
     "emailAddress": "Email address",
@@ -792,5 +793,27 @@
     "body": "Message body",
     "to": "To:",
     "cc": "Cc:"
+  },
+  "xoauth2": {
+    "sectionTitle": "IMAP OAuth2 sign-in (XOAUTH2)",
+    "enable": "Sign in to IMAP with an OAuth2 token (XOAUTH2)",
+    "enableHint": "Required by Microsoft 365, which has disabled basic authentication on IMAP. The password above is still used for sending over SMTP.",
+    "description": "Sign in to IMAP with an OAuth2 token instead of a password. Required by Microsoft 365, which has disabled basic authentication on IMAP. Your SMTP password is left untouched.",
+    "tenant": "Tenant ID",
+    "tenantHint": "Your organisation's directory ID, or \"common\" for personal accounts.",
+    "clientId": "Application (client) ID",
+    "refreshToken": "Refresh token",
+    "refreshTokenHint": "Pebble exchanges this for a fresh access token before every connection, so you never have to paste one again.",
+    "clientSecret": "Client secret (optional)",
+    "clientSecretHint": "Only needed if the app is registered as a confidential client.",
+    "save": "Save & verify token",
+    "saving": "Verifying\u2026",
+    "saved": "Token verified. IMAP will use it from the next sync onwards.",
+    "statusImapToken": "IMAP: signing in with an OAuth2 token",
+    "statusImapPassword": "IMAP: signing in with a password",
+    "statusSmtpToken": "SMTP: signing in with an OAuth2 token",
+    "statusSmtpPassword": "SMTP: signing in with a password",
+    "statusExpiresIn": "Token renews in about {{minutes}} min",
+    "statusRenewsNextSync": "Token renews on the next sync"
   }
 }

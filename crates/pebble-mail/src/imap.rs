@@ -24,6 +24,60 @@ use rustls::{
     DigitallySignedStruct, Error as TlsError, SignatureScheme,
 };
 
+/// SASL `XOAUTH2` authenticator for OAuth2-based IMAP login (Microsoft 365,
+/// Gmail).  The SASL payload is the fixed `user=<addr>^Aauth=Bearer <token>^A^A`
+/// form, which `async-imap` base64-encodes for us.
+pub(crate) struct XOAuth2 {
+    pub user: String,
+    pub token: String,
+}
+
+impl async_imap::Authenticator for XOAuth2 {
+    type Response = String;
+
+    fn process(&self, _challenge: &[u8]) -> Self::Response {
+        format!("user={}\x01auth=Bearer {}\x01\x01", self.user, self.token)
+    }
+}
+
+/// An access token stands in for the password: a JWT always starts with the
+/// base64 of `{"` — `eyJ` — which a real password realistically never does.
+/// This keeps password and token accounts on one code path and one UI field.
+pub fn looks_like_access_token(password: &str) -> bool {
+    password.starts_with("eyJ")
+}
+
+/// Log in with `XOAUTH2` when the stored password is an access token, and with
+/// plain `LOGIN` otherwise.  A macro rather than a function so it does not have
+/// to name the stream's trait bounds at each of the three call sites.
+macro_rules! imap_login {
+    ($client:expr, $cfg:expr) => {{
+        let cfg = $cfg;
+        let client = $client;
+        if looks_like_access_token(&cfg.password) {
+            let auth = XOAuth2 {
+                user: cfg.username.clone(),
+                token: cfg.password.clone(),
+            };
+            tokio::time::timeout(
+                Duration::from_secs(IMAP_COMMAND_TIMEOUT_SECS),
+                client.authenticate("XOAUTH2", &auth),
+            )
+            .await
+            .map_err(|_| imap_timeout_error("IMAP XOAUTH2", IMAP_COMMAND_TIMEOUT_SECS))?
+            .map_err(|(e, _)| PebbleError::Auth(format!("IMAP XOAUTH2 failed: {e}")))
+        } else {
+            tokio::time::timeout(
+                Duration::from_secs(IMAP_COMMAND_TIMEOUT_SECS),
+                client.login(&cfg.username, &cfg.password),
+            )
+            .await
+            .map_err(|_| imap_timeout_error("IMAP login", IMAP_COMMAND_TIMEOUT_SECS))?
+            .map_err(|(e, _)| PebbleError::Auth(format!("IMAP login failed: {e}")))
+        }
+    }};
+}
+
 /// Connection security mode for mail protocols.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -698,13 +752,7 @@ impl ImapProvider {
         // Replay the original greeting so Client::new() is happy
         let stream = PrefixedStream::with_prefix(greeting, inner);
         let client = Client::new(stream);
-        tokio::time::timeout(
-            Duration::from_secs(IMAP_COMMAND_TIMEOUT_SECS),
-            client.login(&self.config.username, &self.config.password),
-        )
-        .await
-        .map_err(|_| imap_timeout_error("IMAP login", IMAP_COMMAND_TIMEOUT_SECS))?
-        .map_err(|(e, _)| PebbleError::Auth(format!("IMAP login failed: {e}")))
+        imap_login!(client, &self.config)
     }
 
     /// Establish a TCP connection, optionally through a SOCKS5 proxy.
@@ -796,13 +844,7 @@ impl ImapProvider {
                 let stream = PrefixedStream::with_prefix(prefix, inner);
 
                 let client = Client::new(stream);
-                tokio::time::timeout(
-                    Duration::from_secs(IMAP_COMMAND_TIMEOUT_SECS),
-                    client.login(&self.config.username, &self.config.password),
-                )
-                .await
-                .map_err(|_| imap_timeout_error("IMAP login", IMAP_COMMAND_TIMEOUT_SECS))?
-                .map_err(|(e, _)| PebbleError::Auth(format!("IMAP login failed: {e}")))?
+                imap_login!(client, &self.config)?
             }
             ConnectionSecurity::StartTls => {
                 // Connect plain, read greeting, optionally send ID, STARTTLS, upgrade TLS.
@@ -836,13 +878,7 @@ impl ImapProvider {
                 let stream = PrefixedStream::with_prefix(prefix, InnerStream::Plain(tcp));
 
                 let client = Client::new(stream);
-                tokio::time::timeout(
-                    Duration::from_secs(IMAP_COMMAND_TIMEOUT_SECS),
-                    client.login(&self.config.username, &self.config.password),
-                )
-                .await
-                .map_err(|_| imap_timeout_error("IMAP login", IMAP_COMMAND_TIMEOUT_SECS))?
-                .map_err(|(e, _)| PebbleError::Auth(format!("IMAP login failed: {e}")))?
+                imap_login!(client, &self.config)?
             }
         };
 

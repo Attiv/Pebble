@@ -4,7 +4,13 @@ import { useConfirmStore } from "@/stores/confirm.store";
 import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { addAccount, startSync, testImapConnection, testPop3Connection, completeOAuthFlow } from "@/lib/api";
+import { addAccount, startSync, testImapConnection, testPop3Connection, completeOAuthFlow, setXOAuth2Refresh } from "@/lib/api";
+import {
+  XOAuth2Fields,
+  emptyXOAuth2Form,
+  isXOAuth2FormComplete,
+  type XOAuth2FormValues,
+} from "@/features/settings/XOAuth2Panel";
 import type { AddAccountRequest } from "@/lib/api";
 import { accountsQueryKey } from "@/hooks/queries";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
@@ -105,6 +111,8 @@ export default function AccountSetup({ onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [testLoading, setTestLoading] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [useXOAuth2, setUseXOAuth2] = useState(false);
+  const [xoauth2Form, setXOAuth2Form] = useState<XOAuth2FormValues>(emptyXOAuth2Form);
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const formRef = useRef(form);
@@ -275,12 +283,38 @@ export default function AccountSetup({ onClose }: Props) {
     setLoading(true);
     try {
       const account = await addAccount(form);
+
+      // Attach the OAuth2 refresh material before the first sync so IMAP has a
+      // usable token. The account already exists at this point, so a failure
+      // here is reported but must not abort — otherwise resubmitting would
+      // create a duplicate account.
+      let tokenError: string | null = null;
+      if (useXOAuth2 && isXOAuth2FormComplete(xoauth2Form)) {
+        try {
+          await setXOAuth2Refresh({
+            accountId: account.id,
+            tenant: xoauth2Form.tenant.trim(),
+            clientId: xoauth2Form.clientId.trim(),
+            clientSecret: xoauth2Form.clientSecret.trim() || undefined,
+            refreshToken: xoauth2Form.refreshToken.trim(),
+          });
+        } catch (err) {
+          tokenError = extractErrorMessage(err);
+        }
+      }
+
       // Invalidate accounts immediately so UI reflects the new account
       await queryClient.invalidateQueries({ queryKey: accountsQueryKey });
       onClose();
       useToastStore.getState().addToast({
-        message: t("accountSetup.accountAdded", "Account added successfully"),
-        type: "success",
+        message: tokenError
+          ? t("accountSetup.accountAddedTokenFailed", {
+              defaultValue:
+                "Account added, but the OAuth2 token could not be verified: {{error}}. You can retry in Settings → Accounts.",
+              error: tokenError,
+            })
+          : t("accountSetup.accountAdded", "Account added successfully"),
+        type: tokenError ? "error" : "success",
       });
       // Start sync in background; poll folders until they appear
       startSync(account.id, syncPollInterval).catch((err) =>
@@ -309,7 +343,7 @@ export default function AccountSetup({ onClose }: Props) {
     : t("accountSetup.imapPort", "IMAP port");
   const incomingHostPlaceholder = isPop3 ? "pop.example.com" : "imap.example.com";
   const canTestConnection =
-    !!form.imap_host && (!isPop3 || (!!form.username && !!form.password));
+    !!form.imap_host && (!isPop3 || (!!form.username && !!form.password)) && !useXOAuth2;
 
   const proxyFields = (
     <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "12px", marginBottom: "16px" }}>
@@ -710,6 +744,52 @@ export default function AccountSetup({ onClose }: Props) {
                 onChange={(e) => handleChange("password", e.target.value)}
               />
             </div>
+
+            {/* IMAP OAuth2 (XOAUTH2) */}
+            {!isPop3 && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "10px",
+                  padding: "12px",
+                  border: "1px solid var(--color-border)",
+                  borderRadius: "8px",
+                }}
+              >
+                <label style={{ display: "flex", alignItems: "flex-start", gap: "8px", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={useXOAuth2}
+                    onChange={(e) => setUseXOAuth2(e.target.checked)}
+                    style={{ marginTop: "2px" }}
+                  />
+                  <span>
+                    <span style={{ fontSize: "13px", color: "var(--color-text-primary)" }}>
+                      {t("xoauth2.enable", "Sign in to IMAP with an OAuth2 token (XOAUTH2)")}
+                    </span>
+                    <span
+                      style={{
+                        display: "block",
+                        fontSize: "11px",
+                        color: "var(--color-text-secondary)",
+                        marginTop: "3px",
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {t(
+                        "xoauth2.enableHint",
+                        "Required by Microsoft 365, which has disabled basic authentication on IMAP. The password above is still used for sending over SMTP.",
+                      )}
+                    </span>
+                  </span>
+                </label>
+
+                {useXOAuth2 && (
+                  <XOAuth2Fields value={xoauth2Form} onChange={setXOAuth2Form} idPrefix="setup-xoauth2" />
+                )}
+              </div>
+            )}
 
             {/* Test Connection */}
             {testResult && (

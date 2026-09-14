@@ -824,3 +824,46 @@ export function previewOAuthIdentity(accountId: string): Promise<OAuthIdentityPr
 export function applyOAuthIdentity(preview: OAuthIdentityPreview): Promise<Account> {
   return invoke("apply_oauth_identity", { preview });
 }
+
+// --- XOAUTH2 (OAuth2 token auth for manually configured IMAP accounts) ---
+
+/**
+ * How an account currently authenticates on each protocol. Microsoft 365 can
+ * require XOAUTH2 on IMAP while still accepting a password on SMTP, so the two
+ * are reported separately.
+ */
+export interface XOAuth2Status {
+  imap_uses_token: boolean;
+  smtp_uses_token: boolean;
+  has_refresh_token: boolean;
+  expires_at: number | null;
+  expires_in_secs: number | null;
+}
+
+export interface XOAuth2RefreshInput {
+  accountId: string;
+  tenant: string;
+  clientId: string;
+  clientSecret?: string;
+  refreshToken: string;
+}
+
+/**
+ * Store OAuth2 refresh material for an account and immediately exchange it for
+ * an access token, which is written into the IMAP password. Resolves only once
+ * the token endpoint has accepted the refresh token, so a successful call means
+ * the whole chain works.
+ */
+export async function setXOAuth2Refresh(input: XOAuth2RefreshInput): Promise<void> {
+  return invoke<void>("set_xoauth2_refresh", {
+    accountId: input.accountId,
+    tenant: input.tenant,
+    clientId: input.clientId,
+    clientSecret: input.clientSecret || null,
+    refreshToken: input.refreshToken,
+  });
+}
+
+export async function getXOAuth2Status(accountId: string): Promise<XOAuth2Status> {
+  return invoke<XOAuth2Status>("get_xoauth2_status", { accountId });
+}

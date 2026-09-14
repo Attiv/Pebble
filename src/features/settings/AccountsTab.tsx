@@ -1,5 +1,6 @@
 import { accountLabel } from "@/lib/accountIdentity";
 import OAuthIdentityPanel from "./OAuthIdentityPanel";
+import XOAuth2Panel from "./XOAuth2Panel";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Trash2, Mail, Pencil, Plug, RefreshCw } from "lucide-react";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -849,6 +850,24 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
             )}
 
             {proxyFields}
+
+            {isImap && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "10px",
+                  padding: "12px",
+                  border: "1px solid var(--color-border)",
+                  borderRadius: "8px",
+                }}
+              >
+                <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--color-text-primary)" }}>
+                  {t("xoauth2.sectionTitle", "IMAP OAuth2 sign-in (XOAUTH2)")}
+                </div>
+                <XOAuth2Panel accountId={account.id} />
+              </div>
+            )}
 
             {isImap && (
               <div

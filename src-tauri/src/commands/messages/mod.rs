@@ -238,6 +238,13 @@ pub(super) async fn connect_imap(
     state: &AppState,
     account_id: &str,
 ) -> std::result::Result<ImapProvider, PebbleError> {
+    crate::commands::xoauth2::ensure_fresh_xoauth2(
+        &state.crypto,
+        &state.store,
+        account_id,
+        None,
+    )
+    .await?;
     let imap_config = load_imap_config(&state.store, &state.crypto, account_id)?;
     let provider = ImapProvider::new(imap_config);
     provider.connect().await?;

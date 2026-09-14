@@ -504,6 +504,8 @@ pub fn run() {
             profile::get_profile_storage_namespace,
             commands::autostart::get_autostart_enabled,
             commands::autostart::set_autostart_enabled,
+            commands::xoauth2::set_xoauth2_refresh,
+            commands::xoauth2::get_xoauth2_status,
             commands::health::health_check,
             commands::health::check_for_update,
             commands::health::open_external_url,

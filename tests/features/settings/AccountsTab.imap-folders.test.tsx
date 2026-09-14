@@ -49,6 +49,16 @@ vi.mock("../../../src/lib/api", () => ({
   deleteAccount: vi.fn(),
   getImapSyncFolders: vi.fn(),
   getOAuthAccountProxySetting: vi.fn(),
+  getXOAuth2Status: vi.fn(() =>
+    Promise.resolve({
+      imap_uses_token: false,
+      smtp_uses_token: false,
+      has_refresh_token: false,
+      expires_at: null,
+      expires_in_secs: null,
+    }),
+  ),
+  setXOAuth2Refresh: vi.fn(() => Promise.resolve()),
   testAccountConnection: vi.fn(),
   triggerSync: vi.fn(),
   updateAccount: vi.fn(),

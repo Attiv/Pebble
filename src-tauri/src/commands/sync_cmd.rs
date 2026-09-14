@@ -589,6 +589,13 @@ fn build_sync_task(
         }
         ProviderType::Imap => {
             // --- IMAP path ---
+            crate::commands::xoauth2::ensure_fresh_xoauth2(
+                &state.crypto,
+                &state.store,
+                &account_id_clone,
+                None,
+            )
+            .await?;
             let imap_config = match crate::commands::messages::load_imap_config(
                 &state.store,
                 &state.crypto,

@@ -19,6 +19,10 @@ pub struct SmtpSender {
     security: ConnectionSecurity,
     accept_invalid_certs: bool,
     proxy: Option<ProxyConfig>,
+    /// The stored password is an OAuth2 access token, so authenticate with
+    /// SASL XOAUTH2 rather than PLAIN/LOGIN. Decided per-account: Microsoft 365
+    /// can require XOAUTH2 on IMAP while still accepting a password on SMTP.
+    use_xoauth2: bool,
 }
 
 impl SmtpSender {
@@ -31,6 +35,7 @@ impl SmtpSender {
         accept_invalid_certs: bool,
         proxy: Option<ProxyConfig>,
     ) -> Self {
+        let use_xoauth2 = crate::imap::looks_like_access_token(&password);
         Self {
             host,
             port,
@@ -38,6 +43,15 @@ impl SmtpSender {
             security,
             accept_invalid_certs,
             proxy,
+            use_xoauth2,
+        }
+    }
+
+    fn mechanisms(&self) -> &'static [Mechanism] {
+        if self.use_xoauth2 {
+            &[Mechanism::Xoauth2]
+        } else {
+            &[Mechanism::Plain, Mechanism::Login]
         }
     }
 
@@ -82,6 +96,7 @@ impl SmtpSender {
                     .tls(Tls::Wrapper(tls_parameters()?))
                     .port(self.port)
                     .credentials(self.credentials.clone())
+                    .authentication(self.mechanisms().to_vec())
                     .build()
             }
             ConnectionSecurity::StartTls => {
@@ -89,6 +104,7 @@ impl SmtpSender {
                     .tls(Tls::Required(tls_parameters()?))
                     .port(self.port)
                     .credentials(self.credentials.clone())
+                    .authentication(self.mechanisms().to_vec())
                     .build()
             }
             ConnectionSecurity::Plain => {
@@ -96,6 +112,7 @@ impl SmtpSender {
                     .tls(Tls::None)
                     .port(self.port)
                     .credentials(self.credentials.clone())
+                    .authentication(self.mechanisms().to_vec())
                     .build()
             }
         };
@@ -140,7 +157,7 @@ impl SmtpSender {
                         )
                         .await
                         .map_err(|e| PebbleError::Network(format!("SMTP handshake failed: {e}")))?;
-                        authenticate_and_send(&mut conn, &self.credentials, email).await?;
+                        authenticate_and_send(&mut conn, &self.credentials, self.mechanisms(), email).await?;
                     }
                     Err(rustls_err) => {
                         tracing::debug!(
@@ -172,7 +189,7 @@ impl SmtpSender {
                         )
                         .await
                         .map_err(|e| PebbleError::Network(format!("SMTP handshake failed: {e}")))?;
-                        authenticate_and_send(&mut conn, &self.credentials, email).await?;
+                        authenticate_and_send(&mut conn, &self.credentials, self.mechanisms(), email).await?;
                     }
                 }
             }
@@ -199,7 +216,7 @@ impl SmtpSender {
                     .await
                     .map_err(|e| PebbleError::Network(format!("STARTTLS failed: {e}")))?;
 
-                authenticate_and_send(&mut conn, &self.credentials, email).await?;
+                authenticate_and_send(&mut conn, &self.credentials, self.mechanisms(), email).await?;
             }
             ConnectionSecurity::Plain => {
                 let socks_stream =
@@ -214,7 +231,7 @@ impl SmtpSender {
                 .await
                 .map_err(|e| PebbleError::Network(format!("SMTP handshake failed: {e}")))?;
 
-                authenticate_and_send(&mut conn, &self.credentials, email).await?;
+                authenticate_and_send(&mut conn, &self.credentials, self.mechanisms(), email).await?;
             }
         }
 
@@ -234,9 +251,9 @@ fn smtp_tls_parameters(host: &str, accept_invalid_certs: bool) -> Result<TlsPara
 async fn authenticate_and_send(
     conn: &mut AsyncSmtpConnection,
     credentials: &Credentials,
+    mechanisms: &[Mechanism],
     email: &lettre::Message,
 ) -> Result<()> {
-    let mechanisms = &[Mechanism::Plain, Mechanism::Login];
     conn.auth(mechanisms, credentials)
         .await
         .map_err(|e| PebbleError::Network(format!("SMTP auth failed: {e}")))?;
