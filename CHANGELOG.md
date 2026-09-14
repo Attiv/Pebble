@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-09-14
+
+### Added
+
+- Added OAuth2 token sign-in for manually configured IMAP accounts (XOAUTH2), required by Microsoft 365 now that basic authentication is disabled on IMAP. The refresh token is stored with the account and exchanged for a fresh access token before every connection. SMTP keeps using its own password, so one account can hold a token for receiving and a password for sending.
+
+### Fixed
+
+- Fixed the IMAP greeting being mistaken for a SASL continuation, which deadlocked the XOAUTH2 handshake until the command timed out.
+- Fixed the XOAUTH2 authenticator not answering the server's failure challenge, which hid the real authentication error behind a timeout.
+- Fixed `pebble-search` failing to build on stable Rust by replacing the nightly-only `str::floor_char_boundary`.
+- Reduced the initial-sync batch from 200 messages to 50 so large mailboxes on slow links no longer exceed the 45s fetch timeout.
+
 ## [0.1.5] - 2026-09-09
 
 ### Added
@@ -334,7 +347,8 @@ This release includes:
 - Windows installers are not code-signed yet, so Windows SmartScreen may show a warning.
 - Outlook support is still experimental and depends on Microsoft Graph permissions configured by the user.
 
-[Unreleased]: https://github.com/QingJ01/Pebble/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/QingJ01/Pebble/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/QingJ01/Pebble/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/QingJ01/Pebble/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/QingJ01/Pebble/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/QingJ01/Pebble/compare/v0.1.2...v0.1.3

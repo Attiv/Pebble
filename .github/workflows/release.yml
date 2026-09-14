@@ -9,7 +9,7 @@ on:
       tag:
         description: Release tag to build, for example v0.1.5
         required: true
-        default: v0.1.5
+        default: v0.1.6
 
 env:
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
