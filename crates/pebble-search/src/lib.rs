@@ -59,7 +59,13 @@ fn schema_needs_rebuild(existing_schema: &Schema) -> bool {
 fn make_snippet(doc: &TantivyDocument, field: tantivy::schema::Field) -> String {
     let body = doc.get_first(field).and_then(|v| v.as_str()).unwrap_or("");
     if body.len() > SNIPPET_MAX_LEN {
-        format!("{}…", &body[..body.floor_char_boundary(SNIPPET_MAX_LEN)])
+        // `str::floor_char_boundary` is still unstable, so walk back to the
+        // nearest boundary by hand — index 0 always is one, so this terminates.
+        let mut end = SNIPPET_MAX_LEN;
+        while !body.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}…", &body[..end])
     } else {
         body.to_string()
     }
