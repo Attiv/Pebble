@@ -281,8 +281,22 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_notification::init())
         .on_window_event(|window, event| {
-            if window.label() == "main" && matches!(event, WindowEvent::Focused(true)) {
-                commands::notifications::clear_attention_indicator(window.app_handle());
+            if window.label() != "main" {
+                return;
+            }
+            match event {
+                WindowEvent::Focused(true) => {
+                    commands::notifications::clear_attention_indicator(window.app_handle());
+                }
+                // Pebble lives in the tray, so closing the window must not destroy it:
+                // if it did, neither the Dock icon nor the tray menu could bring it back
+                // (there would be no window left to show). Hide it instead so the very
+                // same window stays available to `restore_main_window`.
+                WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                _ => {}
             }
         })
         .setup(|app| {
@@ -641,8 +655,28 @@ pub fn run() {
             commands::user_data::set_email_signature,
             commands::user_data::migrate_email_signature_if_absent,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // On macOS a Dock-icon click is routed to `applicationShouldHandleReopen`,
+            // which tao forwards as `RunEvent::Reopen`. The `Builder::run(context)`
+            // shorthand installs a no-op callback (`run(|_, _| {})`) and tao returns
+            // `has_visible_windows` from that delegate method, suppressing AppKit's own
+            // fallback. So a Dock click would only activate the app: a window hidden to
+            // the tray stayed hidden and a window behind other apps stayed behind.
+            // Restoring here mirrors exactly what the tray's "Show Window" item does.
+            #[cfg(target_os = "macos")]
+            {
+                if matches!(event, tauri::RunEvent::Reopen { .. }) {
+                    tracing::info!("Dock reopen requested; restoring the main window");
+                    restore_main_window(app_handle);
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = (app_handle, event);
+            }
+        });
 }
 
 #[cfg(test)]
