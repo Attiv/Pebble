@@ -749,9 +749,14 @@ impl GmailSyncWorker {
             }
         }
 
-        // Fetch new messages concurrently (up to 10 in flight)
+        // Fetch new messages concurrently (up to 10 in flight) but store each
+        // one as soon as it arrives. A first sync of a large mailbox takes
+        // minutes now that requests are paced to stay inside the Gmail query
+        // quota; buffering the whole folder up front would hold every body and
+        // attachment in memory and keep the folder invisible in the UI until
+        // the very end.
         use futures::stream::{self, StreamExt};
-        let fetched_results: Vec<_> = stream::iter(to_fetch.into_iter().map(|gmail_id| {
+        let mut fetched_stream = stream::iter(to_fetch.into_iter().map(|gmail_id| {
             let provider = Arc::clone(&self.provider);
             let account_id = self.base.account_id.clone();
             async move {
@@ -759,11 +764,9 @@ impl GmailSyncWorker {
                 (gmail_id, result)
             }
         }))
-        .buffer_unordered(10)
-        .collect()
-        .await;
+        .buffer_unordered(10);
 
-        for (gmail_id, result) in fetched_results {
+        while let Some((gmail_id, result)) = fetched_stream.next().await {
             match result {
                 Ok(fetched) => match self
                     .store_fetched_message(

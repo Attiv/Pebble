@@ -1,4 +1,5 @@
-use std::sync::RwLock;
+use std::sync::{OnceLock, RwLock};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use reqwest::Client;
@@ -14,6 +15,93 @@ use pebble_core::{
 };
 
 const GMAIL_API_BASE: &str = "https://www.googleapis.com/gmail/v1/users/me";
+
+/// Gmail meters every request against a per-user `total_query_cost` budget of
+/// 6000 units per minute, and one `messages.get` plus any attachment bodies it
+/// pulls already costs roughly 30 of them. A first sync used to fire every
+/// fetch at once, so the whole minute budget went in about 200 calls: the rest
+/// came back `403 RATE_LIMIT_EXCEEDED`, the account never finished a clean
+/// sync, and every folder except INBOX stayed empty.
+///
+/// With ~200 calls as the empirical ceiling, pacing 400 ms apart keeps the
+/// whole client at 150 calls/minute (≈4500 units) and leaves headroom for the
+/// listing, label and profile calls that draw on the same budget.
+/// Override with `PEBBLE_GMAIL_REQUEST_INTERVAL_MS`; `0` disables pacing.
+const DEFAULT_GMAIL_REQUEST_INTERVAL: Duration = Duration::from_millis(400);
+
+/// Parses the `PEBBLE_GMAIL_REQUEST_INTERVAL_MS` override.
+///
+/// Returns `None` when the value is absent or not a plain millisecond count,
+/// so callers fall back to the default rather than treating a typo as "off".
+/// `Some(Duration::ZERO)` means pacing was explicitly disabled.
+fn parse_request_interval_override(value: Option<&str>) -> Option<Duration> {
+    value?.trim().parse::<u64>().ok().map(Duration::from_millis)
+}
+
+fn gmail_request_min_interval() -> Duration {
+    static INTERVAL: OnceLock<Duration> = OnceLock::new();
+    *INTERVAL.get_or_init(|| {
+        if let Some(interval) = parse_request_interval_override(
+            std::env::var("PEBBLE_GMAIL_REQUEST_INTERVAL_MS")
+                .ok()
+                .as_deref(),
+        ) {
+            return interval;
+        }
+        if cfg!(test) {
+            return Duration::ZERO;
+        }
+        DEFAULT_GMAIL_REQUEST_INTERVAL
+    })
+}
+
+/// Hands out request slots so that consecutive Gmail calls are at least
+/// `min_interval` apart.
+struct GmailRequestPacer {
+    min_interval: Duration,
+    /// Slot reserved for the next caller, which may be slightly in the future.
+    next_slot: Instant,
+}
+
+impl GmailRequestPacer {
+    fn new(min_interval: Duration) -> Self {
+        Self {
+            min_interval,
+            // Let the very first request through immediately instead of making
+            // it wait for a slot that was never used.
+            next_slot: Instant::now()
+                .checked_sub(min_interval)
+                .unwrap_or_else(Instant::now),
+        }
+    }
+
+    /// Reserves the next slot and returns how long the caller must wait for it.
+    fn reserve(&mut self) -> Duration {
+        let now = Instant::now();
+        let wait = self.next_slot.saturating_duration_since(now);
+        self.next_slot = now + wait + self.min_interval;
+        wait
+    }
+}
+
+fn gmail_pacer() -> &'static tokio::sync::Mutex<GmailRequestPacer> {
+    static PACER: OnceLock<tokio::sync::Mutex<GmailRequestPacer>> = OnceLock::new();
+    PACER.get_or_init(|| {
+        tokio::sync::Mutex::new(GmailRequestPacer::new(gmail_request_min_interval()))
+    })
+}
+
+/// Waits for this caller's slot. The lock is only held while reserving, so the
+/// actual HTTP request never blocks another caller from reserving behind it.
+async fn pace_gmail_request() {
+    let wait = {
+        let mut pacer = gmail_pacer().lock().await;
+        pacer.reserve()
+    };
+    if !wait.is_zero() {
+        tokio::time::sleep(wait).await;
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Gmail API response types (internal)
@@ -188,7 +276,10 @@ impl GmailProvider {
             .clone()
     }
 
+    /// Every read from the Gmail API funnels through here, so this is where the
+    /// per-user query quota is enforced.
     pub(crate) async fn get(&self, url: &str) -> Result<reqwest::Response> {
+        pace_gmail_request().await;
         self.client
             .get(url)
             .bearer_auth(self.token())
@@ -202,6 +293,7 @@ impl GmailProvider {
         url: &str,
         body: &T,
     ) -> Result<reqwest::Response> {
+        pace_gmail_request().await;
         self.client
             .post(url)
             .bearer_auth(self.token())
@@ -212,6 +304,7 @@ impl GmailProvider {
     }
 
     async fn delete(&self, url: &str) -> Result<reqwest::Response> {
+        pace_gmail_request().await;
         self.client
             .delete(url)
             .bearer_auth(self.token())
@@ -359,6 +452,7 @@ impl GmailProvider {
     /// Get the user's Gmail profile (contains historyId for sync).
     pub async fn get_profile(&self) -> Result<(String, String)> {
         let resp = self.get(&format!("{GMAIL_API_BASE}/profile")).await?;
+        let resp = ensure_gmail_success(resp, "get profile").await?;
         let profile: serde_json::Value = resp
             .json()
             .await
@@ -703,6 +797,7 @@ impl MailTransport for GmailProvider {
 impl FolderProvider for GmailProvider {
     async fn list_folders(&self) -> Result<Vec<Folder>> {
         let resp = self.get(&format!("{GMAIL_API_BASE}/labels")).await?;
+        let resp = ensure_gmail_success(resp, "list labels").await?;
         let label_list: GmailLabelList = resp
             .json()
             .await
@@ -836,6 +931,103 @@ impl MailProvider for GmailProvider {
 // ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------
+
+/// Cap on how much of a failed response body is surfaced. Gmail returns a short
+/// JSON error, but a proxy or captive portal can return a whole HTML page.
+const GMAIL_ERROR_BODY_LIMIT: usize = 400;
+
+/// Collapse runs of whitespace, so a pretty-printed JSON body fits the limit.
+fn collapse_whitespace(body: &str) -> String {
+    let mut out = String::with_capacity(body.len());
+    let mut in_space = false;
+    for ch in body.chars() {
+        if ch.is_whitespace() {
+            if !in_space {
+                out.push(' ');
+                in_space = true;
+            }
+        } else {
+            out.push(ch);
+            in_space = false;
+        }
+    }
+    out.trim().to_string()
+}
+
+/// Pull the fields that explain a Gmail failure out of a JSON error body.
+///
+/// Gmail pretty-prints its errors and puts the useful part — `details[].reason`
+/// — at the very end, so a plain prefix truncation drops exactly the field that
+/// tells `ACCESS_TOKEN_SCOPE_INSUFFICIENT` (the token is fine, it just carries
+/// no Gmail scope) apart from `accessNotConfigured` (the project never enabled
+/// the Gmail API at all). Two very different fixes.
+fn gmail_error_summary(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    let error = value.get("error")?;
+    let message = error.get("message").and_then(|m| m.as_str());
+    let reason = error
+        .get("details")
+        .and_then(|details| details.as_array())
+        .and_then(|details| {
+            details
+                .iter()
+                .find_map(|detail| detail.get("reason").and_then(|r| r.as_str()))
+        });
+
+    if message.is_none() && reason.is_none() {
+        return None;
+    }
+
+    let mut summary = message.unwrap_or_default().to_string();
+    if let Some(reason) = reason {
+        if !summary.contains(reason) {
+            if !summary.is_empty() {
+                summary.push_str(" | ");
+            }
+            summary.push_str("reason: ");
+            summary.push_str(reason);
+        }
+    }
+    Some(summary)
+}
+
+/// Build the message shown when the Gmail API answers with a failure status.
+fn gmail_error_message(what: &str, status: u16, body: &str) -> String {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return format!("Gmail API {what} failed (status {status})");
+    }
+    if let Some(summary) = gmail_error_summary(trimmed) {
+        return format!("Gmail API {what} failed (status {status}): {summary}");
+    }
+    let collapsed = collapse_whitespace(trimmed);
+    let mut detail: String = collapsed.chars().take(GMAIL_ERROR_BODY_LIMIT).collect();
+    if detail.chars().count() < collapsed.chars().count() {
+        detail.push_str("...");
+    }
+    format!("Gmail API {what} failed (status {status}): {detail}")
+}
+
+/// Reject a failed Gmail response before it is decoded.
+///
+/// A Gmail error body is a JSON object, so it decodes cleanly into the same
+/// shapes the success path expects and every missing field falls back to a
+/// default. An unchecked response therefore turns a 403 or a 401 into an empty
+/// list, and the caller cannot tell "no mail" apart from "the request was
+/// refused" — which is how a disabled Gmail API ends up looking like a mailbox
+/// that syncs successfully and forever contains nothing.
+async fn ensure_gmail_success(resp: reqwest::Response, what: &str) -> Result<reqwest::Response> {
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(resp);
+    }
+    let body = resp.text().await.unwrap_or_default();
+    Err(PebbleError::Network(gmail_error_message(
+        what,
+        status.as_u16(),
+        &body,
+    )))
+}
 
 /// Gmail system labels that should not appear as sidebar folders.
 fn is_hidden_gmail_label(id: &str) -> bool {
@@ -1883,5 +2075,199 @@ mod tests {
         assert_eq!(provider.token(), "initial");
         provider.set_access_token("updated".to_string());
         assert_eq!(provider.token(), "updated");
+    }
+
+    #[test]
+    fn gmail_error_message_keeps_the_status_and_the_reason() {
+        let message = gmail_error_message(
+            "list labels",
+            403,
+            r#"{"error":{"code":403,"message":"Gmail API has not been used in project 123 before or it is disabled."}}"#,
+        );
+
+        assert!(message.contains("list labels"), "{message}");
+        assert!(message.contains("403"), "{message}");
+        assert!(
+            message.contains("has not been used in project"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn gmail_error_message_surfaces_the_reason_of_a_pretty_printed_error() {
+        let body = r#"{
+  "error": {
+    "code": 403,
+    "message": "Request had insufficient authentication scopes.",
+    "errors": [
+      {
+        "message": "Insufficient Permission",
+        "domain": "global",
+        "reason": "insufficientPermissions"
+      }
+    ],
+    "status": "PERMISSION_DENIED",
+    "details": [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        "reason": "ACCESS_TOKEN_SCOPE_INSUFFICIENT",
+        "domain": "googleapis.com",
+        "metadata": {
+          "service": "gmail.googleapis.com",
+          "method": "caribou.api.proto.MailboxService.ListLabels"
+        }
+      }
+    ]
+  }
+}"#;
+        let message = gmail_error_message("list labels", 403, body);
+
+        assert!(
+            message.contains("ACCESS_TOKEN_SCOPE_INSUFFICIENT"),
+            "the reason must survive even though it sits at the end of the body: {message}"
+        );
+        assert!(
+            message.contains("insufficient authentication scopes"),
+            "{message}"
+        );
+        assert!(!message.ends_with("..."), "the summary should be complete");
+    }
+
+    #[test]
+    fn gmail_error_message_collapses_whitespace_before_truncating() {
+        let body = "Gmail is unavailable\n\n  please try again later\n".repeat(40);
+        let message = gmail_error_message("list labels", 502, &body);
+
+        assert!(!message.contains('\n'), "{message}");
+        assert!(message.ends_with("..."), "{message}");
+        assert!(
+            message.chars().count() < GMAIL_ERROR_BODY_LIMIT + 80,
+            "message should stay bounded, got {} chars",
+            message.chars().count()
+        );
+    }
+
+    #[test]
+    fn gmail_error_message_copes_with_an_empty_body() {
+        assert_eq!(
+            gmail_error_message("get profile", 401, "   "),
+            "Gmail API get profile failed (status 401)"
+        );
+    }
+
+    #[test]
+    fn gmail_error_message_truncates_a_huge_body() {
+        let body = "x".repeat(GMAIL_ERROR_BODY_LIMIT * 3);
+        let message = gmail_error_message("list labels", 502, &body);
+
+        assert!(message.ends_with("..."), "expected an ellipsis marker");
+        assert!(
+            message.chars().count() < GMAIL_ERROR_BODY_LIMIT + 80,
+            "message should stay bounded, got {} chars",
+            message.chars().count()
+        );
+    }
+
+    #[test]
+    fn request_interval_override_accepts_a_millisecond_count() {
+        assert_eq!(
+            parse_request_interval_override(Some("250")),
+            Some(Duration::from_millis(250))
+        );
+        assert_eq!(
+            parse_request_interval_override(Some("  1000 ")),
+            Some(Duration::from_millis(1000))
+        );
+    }
+
+    #[test]
+    fn request_interval_override_of_zero_disables_pacing() {
+        assert_eq!(
+            parse_request_interval_override(Some("0")),
+            Some(Duration::ZERO)
+        );
+    }
+
+    #[test]
+    fn request_interval_override_falls_back_when_unset_or_unparsable() {
+        // A typo must not silently switch the throttle off.
+        assert_eq!(parse_request_interval_override(None), None);
+        assert_eq!(parse_request_interval_override(Some("")), None);
+        assert_eq!(parse_request_interval_override(Some("300ms")), None);
+        assert_eq!(parse_request_interval_override(Some("-1")), None);
+        assert_eq!(parse_request_interval_override(Some("1.5")), None);
+    }
+
+    #[test]
+    fn pacer_lets_the_first_request_through_immediately() {
+        let mut pacer = GmailRequestPacer::new(Duration::from_millis(300));
+
+        assert_eq!(pacer.reserve(), Duration::ZERO);
+    }
+
+    #[test]
+    fn pacer_spaces_consecutive_requests_by_the_minimum_interval() {
+        let min_interval = Duration::from_millis(300);
+        let mut pacer = GmailRequestPacer::new(min_interval);
+
+        assert_eq!(pacer.reserve(), Duration::ZERO);
+
+        // The second caller cannot get a slot sooner than the interval, and the
+        // wait must stay bounded by it (no runaway drift).
+        let second = pacer.reserve();
+        assert!(
+            second <= min_interval,
+            "second wait {second:?} should not exceed the interval"
+        );
+        assert!(
+            second > Duration::ZERO,
+            "second caller should have been made to wait"
+        );
+    }
+
+    #[test]
+    fn pacer_with_a_zero_interval_never_waits() {
+        let mut pacer = GmailRequestPacer::new(Duration::ZERO);
+
+        assert_eq!(pacer.reserve(), Duration::ZERO);
+        assert_eq!(pacer.reserve(), Duration::ZERO);
+        assert_eq!(pacer.reserve(), Duration::ZERO);
+    }
+
+    #[test]
+    fn pacer_reserves_slots_so_waiting_callers_do_not_collide() {
+        // Each reservation must push the next slot one more interval out, so
+        // that N queued callers are spread over N intervals rather than all
+        // waking up at the same instant.
+        let min_interval = Duration::from_millis(200);
+        let mut pacer = GmailRequestPacer::new(min_interval);
+
+        let waits: Vec<Duration> = (0..3).map(|_| pacer.reserve()).collect();
+
+        assert!(
+            waits[1] > waits[0],
+            "second reserved slot {waits:?} should be later than the first"
+        );
+        assert!(
+            waits[2] > waits[1],
+            "third reserved slot {waits:?} should be later than the second"
+        );
+    }
+
+    #[test]
+    fn default_request_interval_stays_inside_googles_per_minute_budget() {
+        // 6000 units/minute ÷ ~30 units per call = about 200 calls/minute is
+        // where Gmail starts refusing. The default must sit clearly below it.
+        let requests_per_minute =
+            Duration::from_secs(60).as_millis() / DEFAULT_GMAIL_REQUEST_INTERVAL.as_millis();
+
+        assert!(
+            requests_per_minute <= 160,
+            "default pacing allows {requests_per_minute} calls/minute, too close to Google's ~200"
+        );
+        assert!(
+            requests_per_minute >= 60,
+            "default pacing of {requests_per_minute} calls/minute is needlessly slow"
+        );
     }
 }
