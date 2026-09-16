@@ -20,6 +20,14 @@ pub struct OAuthConfig {
     pub auth_url: String,
     pub token_url: String,
     pub scopes: Vec<String>,
+    /// Extra query parameters appended to the authorization URL.
+    ///
+    /// Some providers express requirements that have no scope-string
+    /// equivalent. Google is the important case: `access_type=offline` is what
+    /// makes Google issue a refresh token, and `prompt=consent` forces a full
+    /// consent screen so a re-authorised account cannot silently inherit an
+    /// older, narrower grant.
+    pub auth_params: Vec<(String, String)>,
     pub redirect_port: u16,
 }
 
@@ -145,6 +153,10 @@ impl OAuthManager {
 
         for scope in &self.config.scopes {
             auth_request = auth_request.add_scope(Scope::new(scope.clone()));
+        }
+
+        for (name, value) in &self.config.auth_params {
+            auth_request = auth_request.add_extra_param(name.clone(), value.clone());
         }
 
         let (auth_url, csrf_token) = auth_request.url();
@@ -280,6 +292,7 @@ mod tests {
             auth_url: "https://accounts.google.com/o/oauth2/v2/auth".into(),
             token_url: "https://oauth2.googleapis.com/token".into(),
             scopes: vec!["https://mail.google.com/".into()],
+            auth_params: vec![("access_type".into(), "offline".into())],
             redirect_port: 8765,
         }
     }
@@ -317,6 +330,30 @@ mod tests {
         assert!(url.contains("code_challenge"));
         assert!(!state.verifier.secret().is_empty());
         assert!(!state.csrf_token.secret().is_empty());
+    }
+
+    #[tokio::test]
+    async fn start_auth_appends_configured_extra_params() {
+        let mut cfg = test_config();
+        cfg.auth_params = vec![
+            ("access_type".into(), "offline".into()),
+            ("prompt".into(), "consent".into()),
+        ];
+        let mgr = OAuthManager::new(cfg);
+        let (url, _state) = mgr.start_auth().await.unwrap();
+        assert!(url.contains("access_type=offline"), "{url}");
+        assert!(url.contains("prompt=consent"), "{url}");
+        assert!(url.contains("scope="), "{url}");
+    }
+
+    #[tokio::test]
+    async fn start_auth_without_extra_params_omits_them() {
+        let mut cfg = test_config();
+        cfg.auth_params = vec![];
+        let mgr = OAuthManager::new(cfg);
+        let (url, _state) = mgr.start_auth().await.unwrap();
+        assert!(!url.contains("access_type="), "{url}");
+        assert!(!url.contains("prompt="), "{url}");
     }
 
     #[test]
@@ -399,6 +436,7 @@ mod tests {
             auth_url: format!("http://{addr}/auth"),
             token_url: format!("http://{addr}/token"),
             scopes: vec![],
+            auth_params: vec![],
             redirect_port: 8765,
         });
         let token_pair = manager

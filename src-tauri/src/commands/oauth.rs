@@ -278,6 +278,16 @@ pub(crate) fn gmail_oauth_config() -> OAuthConfig {
             "https://www.googleapis.com/auth/userinfo.email".to_string(),
             "https://www.googleapis.com/auth/userinfo.profile".to_string(),
         ],
+        // Google expresses "give me offline access" as a URL parameter, not a
+        // scope (unlike Microsoft's `offline_access` scope below). Without
+        // `access_type=offline` Google is not obliged to return a refresh
+        // token, and without `prompt=consent` it may skip the consent screen
+        // entirely and hand back a token carrying an older, narrower scope set
+        // — which is how an account ends up with no Gmail permission at all.
+        auth_params: vec![
+            ("access_type".to_string(), "offline".to_string()),
+            ("prompt".to_string(), "consent".to_string()),
+        ],
         redirect_port: 0,
     }
 }
@@ -302,6 +312,9 @@ pub(crate) fn outlook_oauth_config() -> OAuthConfig {
             "https://graph.microsoft.com/User.Read".to_string(),
             "offline_access".to_string(),
         ],
+        // Microsoft asks for offline access through the `offline_access` scope
+        // above, so no extra authorization parameters are needed here.
+        auth_params: vec![],
         redirect_port: 0,
     }
 }
@@ -1244,6 +1257,46 @@ MICROSOFT_CLIENT_SECRET='microsoft-secret'
 
         assert_eq!(config.client_id, "google-client.apps.googleusercontent.com");
         assert_eq!(config.client_secret.as_deref(), Some("google-secret"));
+    }
+
+    #[test]
+    fn gmail_oauth_config_asks_for_offline_access_and_fresh_consent() {
+        let config = gmail_oauth_config();
+
+        let has_param = |name: &str, value: &str| {
+            config
+                .auth_params
+                .iter()
+                .any(|(n, v)| n == name && v == value)
+        };
+
+        assert!(
+            has_param("access_type", "offline"),
+            "Google needs access_type=offline or it is not obliged to issue a refresh token"
+        );
+        assert!(
+            has_param("prompt", "consent"),
+            "prompt=consent is required so re-authorising forces a full consent screen \
+             instead of silently reusing a narrower existing grant"
+        );
+        assert!(
+            config
+                .scopes
+                .iter()
+                .any(|scope| scope == "https://mail.google.com/"),
+            "the full Gmail scope is required for the Gmail REST API"
+        );
+    }
+
+    #[test]
+    fn outlook_oauth_config_uses_offline_access_scope_not_auth_params() {
+        let config = outlook_oauth_config();
+
+        assert!(
+            config.auth_params.is_empty(),
+            "Microsoft expresses offline access through the offline_access scope"
+        );
+        assert!(config.scopes.iter().any(|scope| scope == "offline_access"));
     }
 
     #[test]
