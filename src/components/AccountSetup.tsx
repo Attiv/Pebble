@@ -59,6 +59,19 @@ const PRESETS: Record<
     smtp_port: 587,
     smtp_security: "starttls",
   },
+  // Apple publishes these endpoints for third-party clients. Note the
+  // asymmetry in Apple's docs: IMAP accepts the short name before the @ while
+  // SMTP wants the full address — we send the full address on both, which
+  // Apple documents as the fallback and which every third-party client uses.
+  // Authentication is an app-specific password; iCloud has no OAuth for IMAP.
+  icloud: {
+    imap_host: "imap.mail.me.com",
+    imap_port: 993,
+    imap_security: "tls",
+    smtp_host: "smtp.mail.me.com",
+    smtp_port: 587,
+    smtp_security: "starttls",
+  },
   qq: {
     imap_host: "imap.qq.com",
     imap_port: 993,
@@ -76,6 +89,26 @@ const PRESETS: Record<
     smtp_security: "tls",
   },
 };
+
+// Preset keys are not display names: the generic "capitalise the first letter"
+// path renders `icloud` as "Icloud" and `qq` as "Qq". Keep an explicit label.
+const PRESET_LABELS: Record<string, string> = {
+  gmail: "Gmail",
+  outlook: "Outlook",
+  icloud: "iCloud",
+  qq: "QQ",
+  "163": "163",
+};
+
+/**
+ * iCloud Mail requires an app-specific password (Apple enforces two-factor
+ * authentication, and the plain Apple Account password is rejected by
+ * third-party clients). Scope the hint to Apple's hosts so it does not clutter
+ * the form for other providers.
+ */
+function isIcloudHost(host: string): boolean {
+  return host.trim().toLowerCase().endsWith("mail.me.com");
+}
 
 interface Props {
   onClose: () => void;
@@ -530,7 +563,7 @@ export default function AccountSetup({ onClose }: Props) {
                     textTransform: "capitalize",
                   }}
                 >
-                  {key === "163" ? "163" : key.charAt(0).toUpperCase() + key.slice(1)}
+                  {PRESET_LABELS[key] ?? key}
                 </button>
               ))}
             </div>
@@ -743,6 +776,14 @@ export default function AccountSetup({ onClose }: Props) {
                 value={form.password}
                 onChange={(e) => handleChange("password", e.target.value)}
               />
+              {isIcloudHost(form.imap_host) && (
+                <small data-testid="icloud-password-hint">
+                  {t(
+                    "accountSetup.icloudPasswordHelp",
+                    "iCloud requires an app-specific password: turn on two-factor authentication, then generate one at account.apple.com under Sign-In and Security → App-Specific Passwords. Your Apple Account password will be rejected.",
+                  )}
+                </small>
+              )}
             </div>
 
             {/* IMAP OAuth2 (XOAUTH2) */}

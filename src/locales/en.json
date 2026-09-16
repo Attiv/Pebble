@@ -501,6 +501,7 @@
     "username": "Username",
     "usernameHint": "Defaults to email address",
     "password": "Password / App password",
+    "icloudPasswordHelp": "iCloud requires an app-specific password: turn on two-factor authentication, then generate one at account.apple.com under Sign-In and Security → App-Specific Passwords. Your Apple Account password will be rejected.",
     "security": "Security",
     "securityTls": "SSL/TLS",
     "securityStarttls": "STARTTLS",

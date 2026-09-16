@@ -501,6 +501,7 @@
     "username": "用户名",
     "usernameHint": "默认使用邮箱地址",
     "password": "密码 / 应用专用密码",
+    "icloudPasswordHelp": "iCloud 需要使用应用专用密码：先开启双重认证，再到 account.apple.com 的“登录与安全性 → App 专用密码”中生成一个。Apple 账户密码会被服务器拒绝。",
     "security": "安全连接",
     "securityTls": "SSL/TLS",
     "securityStarttls": "STARTTLS",
