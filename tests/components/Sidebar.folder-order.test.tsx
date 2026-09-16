@@ -59,6 +59,19 @@ vi.mock("../../src/hooks/queries", () => ({
   }),
 }));
 
+// Sidebar reads account unread counts through this module directly (not the
+// `hooks/queries` barrel), so it needs its own mock.
+vi.mock("../../src/hooks/queries/useAccountUnreadCounts", () => ({
+  useAccountUnreadCounts: () => ({}),
+  unreadCountForAccount: () => 0,
+}));
+
+// Folder ordering does not depend on the mark-all-read button, which has its own
+// suite (Sidebar.markAllRead.test.tsx).
+vi.mock("../../src/components/MarkAllReadButton", () => ({
+  default: () => null,
+}));
+
 vi.mock("../../src/hooks/queries/useFolderUnreadCounts", () => ({
   useFolderUnreadCountsForAccounts: () => ({ data: {} }),
 }));
@@ -134,7 +147,7 @@ describe("Sidebar folder order", () => {
     ]);
   });
 
-  it("uses a translucent account selector when an app background is active", () => {
+  it("keeps the account list translucent when an app background is active", () => {
     mocks.accounts = [
       {
         id: "account-1",
@@ -168,9 +181,20 @@ describe("Sidebar folder order", () => {
 
     render(<Sidebar />);
 
-    const selector = screen.getByRole("combobox", { name: "Email Accounts" });
-    const style = selector.getAttribute("style") ?? "";
-    expect(style).toContain("color-mix(in srgb, var(--color-accent) 6%, transparent)");
-    expect(style).not.toContain("background-color: var(--color-bg)");
+    // Nothing here may paint an opaque panel over the wallpaper: the list keeps
+    // its own background off and every row is either transparent or themed via
+    // `--color-sidebar-active`, which `.app-shell--with-background` already makes
+    // translucent for the sidebar as a whole.
+    const list = screen.getByTestId("account-list");
+    expect(list.getAttribute("style") ?? "").not.toContain("--color-bg");
+
+    const row = screen.getByTestId("account-row-account-1");
+    const rowStyle = row.getAttribute("style") ?? "";
+    expect(rowStyle).toContain("background-color: transparent");
+    expect(rowStyle).not.toContain("--color-bg");
+
+    // The avatar is tinted from `--color-text-secondary` mixed with transparent.
+    const avatar = row.querySelector("span[aria-hidden='true']");
+    expect(avatar?.getAttribute("style") ?? "").toContain("14%, transparent");
   });
 });

@@ -1,4 +1,3 @@
-import { accountOptionLabel } from "@/lib/accountIdentity";
 import { useEffect, useMemo } from "react";
 import {
   Inbox,
@@ -17,13 +16,15 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useUIStore } from "../stores/ui.store";
+import type { ActiveView } from "../stores/ui.store";
 import { isComposeDirty, useComposeStore } from "../stores/compose.store";
 import { useConfirmStore } from "../stores/confirm.store";
 import { useMailStore } from "../stores/mail.store";
 import { useAccountsQuery, useFoldersForAccountsQuery } from "../hooks/queries";
 import { useFolderUnreadCountsForAccounts } from "../hooks/queries/useFolderUnreadCounts";
+import { useAccountUnreadCounts } from "../hooks/queries/useAccountUnreadCounts";
+import SidebarAccountList from "./SidebarAccountList";
 import {
-  ALL_ACCOUNTS_SELECT_VALUE,
   buildAllAccountsFolders,
   sortFoldersForSidebar,
   unreadCountForFolder,
@@ -56,6 +57,13 @@ const DEFAULT_FOLDERS: { role: string; labelKey: string }[] = [
   { role: "spam", labelKey: "sidebar.spam" },
 ];
 
+/**
+ * Views that show nothing about a particular mailbox. Selecting an account while
+ * one of these is open has to move back to the mail view, otherwise the click
+ * appears to do nothing.
+ */
+const MAILBOX_AGNOSTIC_VIEWS: ActiveView[] = ["settings", "contacts"];
+
 export default function Sidebar() {
   const { t } = useTranslation();
   const activeView = useUIStore((s) => s.activeView);
@@ -73,8 +81,9 @@ export default function Sidebar() {
     () => activeAccountId ? [activeAccountId] : accounts.map((account) => account.id),
     [accounts, activeAccountId],
   );
-  const { data: folders = EMPTY_FOLDERS, isFetched: foldersFetched } = useFoldersForAccountsQuery(folderAccountIds);
+  const { data: folders = EMPTY_FOLDERS } = useFoldersForAccountsQuery(folderAccountIds);
   const { data: unreadCounts = {} } = useFolderUnreadCountsForAccounts(folderAccountIds);
+  const accountUnreadCounts = useAccountUnreadCounts();
   const ROLE_LABELS: Record<string, string> = {
     inbox: t("sidebar.inbox"),
     sent: t("sidebar.sent"),
@@ -105,19 +114,17 @@ export default function Sidebar() {
   }, [accounts, activeAccountId, setActiveAccountId]);
 
   // Auto-select inbox folder when folders load.
-  // If the selected account has no folders, try the next account.
+  //
+  // A mailbox with no folders is left selected on purpose. The previous version
+  // advanced to the next account, which made any account whose first sync had not
+  // finished impossible to select at all: clicking it bounced the selection away.
+  // InboxView shows a sync prompt for that case instead.
   useEffect(() => {
     if (displayedFolders.length > 0 && !activeFolderId) {
       const inbox = displayedFolders.find((f) => f.role === "inbox");
       setActiveFolderId((inbox ?? displayedFolders[0]).id);
-    } else if (!allAccountsMode && foldersFetched && displayedFolders.length === 0 && activeAccountId && accounts.length > 1) {
-      const idx = accounts.findIndex((a) => a.id === activeAccountId);
-      const next = accounts[idx + 1] ?? accounts.find((a) => a.id !== activeAccountId);
-      if (next) {
-        setActiveAccountId(next.id);
-      }
     }
-  }, [displayedFolders, foldersFetched, activeFolderId, setActiveFolderId, accounts, activeAccountId, setActiveAccountId, allAccountsMode]);
+  }, [displayedFolders, activeFolderId, setActiveFolderId]);
 
   async function confirmDiscardDraft() {
     if (isComposeDirty()) {
@@ -151,6 +158,24 @@ export default function Sidebar() {
     }
     setActiveView("inbox");
     setActiveFolderId(folderId);
+  }
+
+  async function handleAccountSelect(accountId: string | null) {
+    if (isComposeDirty()) {
+      const confirmed = await confirmDiscardDraft();
+      if (!confirmed) return;
+      useComposeStore.getState().discardComposeAndSetActiveView("inbox");
+      setActiveAccountId(accountId);
+      return;
+    }
+    // Settings and Contacts are not tied to a mailbox, so staying on them after
+    // picking a different account looks like the click did nothing. The mail
+    // views (inbox, starred, search, snoozed, kanban) already follow the
+    // selected account, so those are left alone.
+    if (MAILBOX_AGNOSTIC_VIEWS.includes(activeView)) {
+      setActiveView("inbox");
+    }
+    setActiveAccountId(accountId);
   }
 
   const buttonBase: React.CSSProperties = {
@@ -208,37 +233,19 @@ export default function Sidebar() {
         </div>
       )}
 
-      {/* Account switcher */}
-      {!sidebarCollapsed && accounts.length > 0 && (
-        <div style={{ padding: "0 10px 8px" }}>
-          <select
-            aria-label={t("settings.emailAccounts", "Email Accounts")}
-            value={activeAccountId || ALL_ACCOUNTS_SELECT_VALUE}
-            onChange={(e) => {
-              setActiveAccountId(e.target.value === ALL_ACCOUNTS_SELECT_VALUE ? null : e.target.value);
-              setActiveFolderId(null);
-            }}
-            style={{
-              width: "100%",
-              padding: "6px 10px",
-              fontSize: "13px",
-              borderRadius: "8px",
-              border: "1.5px solid color-mix(in srgb, var(--color-accent) 50%, var(--color-border))",
-              backgroundColor: "color-mix(in srgb, var(--color-accent) 6%, transparent)",
-              color: "var(--color-text-primary)",
-              cursor: "pointer",
-            }}
-          >
-            <option value={ALL_ACCOUNTS_SELECT_VALUE}>
-              {t("sidebar.allAccounts", "All accounts")}
-            </option>
-            {accounts.map((acc) => (
-              <option key={acc.id} value={acc.id}>
-                {accountOptionLabel(acc)}
-              </option>
-            ))}
-          </select>
-        </div>
+      {/* Account list. Every mailbox is listed at once, with its own unread
+          count, so accounts can be told apart and switched between at a glance.
+          The mark-all-read action rides on the selected row, because clearing a
+          mailbox only has a target when one account is selected. */}
+      {accounts.length > 0 && (
+        <SidebarAccountList
+          accounts={accounts}
+          activeAccountId={activeAccountId}
+          unreadCounts={accountUnreadCounts}
+          collapsed={sidebarCollapsed}
+          showUnread={showUnread}
+          onSelect={handleAccountSelect}
+        />
       )}
 
       {/* Folders section */}

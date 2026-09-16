@@ -289,6 +289,10 @@ pub struct TranslateConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThreadSummary {
     pub thread_id: String,
+    /// Owning mailbox, taken from the most recent message in the thread. In the
+    /// combined inbox the message list labels every row with the account it
+    /// came from, and threads need the same label to stay identifiable.
+    pub account_id: String,
     pub subject: String,
     pub snippet: String,
     pub last_date: i64,

@@ -38,6 +38,14 @@ vi.mock("../../../src/hooks/queries", () => ({
       },
     ],
   }),
+  useAccountUnreadCounts: () => ({}),
+  unreadCountForAccount: () => 0,
+}));
+
+// Proxy/colour editing does not exercise mark-all-read; it has its own suite
+// (MarkAllReadButton.test.tsx).
+vi.mock("../../../src/components/MarkAllReadButton", () => ({
+  default: () => null,
 }));
 
 vi.mock("../../../src/lib/api", () => ({

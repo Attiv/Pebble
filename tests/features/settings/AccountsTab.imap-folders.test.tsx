@@ -43,6 +43,14 @@ vi.mock("../../../src/hooks/queries", () => ({
       },
     ],
   }),
+  useAccountUnreadCounts: () => ({}),
+  unreadCountForAccount: () => 0,
+}));
+
+// IMAP folder selection does not exercise mark-all-read, which is covered by
+// MarkAllReadButton.test.tsx.
+vi.mock("../../../src/components/MarkAllReadButton", () => ({
+  default: () => null,
 }));
 
 vi.mock("../../../src/lib/api", () => ({

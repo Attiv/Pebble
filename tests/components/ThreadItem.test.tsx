@@ -12,6 +12,7 @@ vi.mock("react-i18next", () => ({
 function makeThread(overrides: Partial<ThreadSummary> = {}): ThreadSummary {
   return {
     thread_id: "thread-1",
+    account_id: "account-1",
     subject: "Thread subject",
     snippet: "Thread snippet",
     last_date: 1_700_000_000,
@@ -47,5 +48,35 @@ describe("ThreadItem", () => {
     );
 
     expect(screen.getByRole("option").className).not.toContain("thread-list-row--unread");
+  });
+
+  it("names the source mailbox when the combined inbox supplies a badge", () => {
+    render(
+      <ThreadItem
+        thread={makeThread()}
+        isSelected={false}
+        onClick={vi.fn()}
+        accountBadge={{ color: "#0ea5e9", label: "Personal", title: "Personal · me@example.com" }}
+      />,
+    );
+
+    const badge = screen.getByTestId("account-badge");
+
+    expect(badge.textContent).toBe("Personal");
+    expect(badge.getAttribute("title")).toBe("Personal · me@example.com");
+    expect(screen.getByTestId("account-badge-dot").style.backgroundColor).toBe("rgb(14, 165, 233)");
+  });
+
+  it("leaves a thread from a single mailbox unlabelled", () => {
+    render(
+      <ThreadItem
+        thread={makeThread()}
+        isSelected={false}
+        onClick={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId("account-badge")).toBeNull();
+    expect(screen.queryByTestId("account-color-bar")).toBeNull();
   });
 });

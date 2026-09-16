@@ -90,6 +90,7 @@ vi.mock("../../../src/components/ConfirmDialog", () => ({
 
 vi.mock("../../../src/lib/api", () => ({
   emptyTrash: vi.fn(),
+  triggerSync: vi.fn(),
 }));
 
 import InboxView from "../../../src/features/inbox/InboxView";

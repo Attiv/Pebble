@@ -1,5 +1,7 @@
 use super::messages::provider_dispatch::{parse_imap_uid, ConnectedProvider};
 use super::messages::{find_folder_by_role, find_message_folder, refresh_search_documents};
+use super::read_flags::{sync_read_flag_remote, RemoteFlagTarget};
+use crate::badge;
 use crate::state::AppState;
 use pebble_core::traits::{FolderProvider, LabelProvider};
 use pebble_core::{FolderRole, Message, PebbleError, ProviderType};
@@ -102,6 +104,7 @@ async fn prepare_batch(
 
 #[tauri::command]
 pub async fn batch_archive(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     message_ids: Vec<String>,
 ) -> std::result::Result<u32, PebbleError> {
@@ -316,11 +319,13 @@ pub async fn batch_archive(
         success_count,
         message_ids.len()
     );
+    badge::request_refresh(&app);
     Ok(success_count)
 }
 
 #[tauri::command]
 pub async fn batch_delete(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     message_ids: Vec<String>,
 ) -> std::result::Result<u32, PebbleError> {
@@ -511,11 +516,13 @@ pub async fn batch_delete(
         success_count,
         message_ids.len()
     );
+    badge::request_refresh(&app);
     Ok(success_count)
 }
 
 #[tauri::command]
 pub async fn batch_mark_read(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     message_ids: Vec<String>,
     is_read: bool,
@@ -527,120 +534,15 @@ pub async fn batch_mark_read(
     // Track which messages were successfully updated remotely
     let mut synced_ids: Vec<String> = Vec::new();
     let mut queued_for_local_commit_ids: Vec<String> = Vec::new();
-    // Remote sync: connect once per account, operate, disconnect.
     for (account_id, (provider_type, messages)) in &groups {
-        if matches!(provider_type, ProviderType::Pop3) {
-            synced_ids.extend(messages.iter().map(|msg| msg.id.clone()));
-            continue;
-        }
-
-        match ConnectedProvider::connect(&state, account_id, provider_type).await {
-            Ok(conn) => {
-                match &conn {
-                    ConnectedProvider::Gmail(provider) => {
-                        let (add, remove) = if is_read {
-                            (vec![], vec!["UNREAD".to_string()])
-                        } else {
-                            (vec!["UNREAD".to_string()], vec![])
-                        };
-                        for msg in messages {
-                            match provider.modify_labels(&msg.remote_id, &add, &remove).await {
-                                Ok(_) => synced_ids.push(msg.id.clone()),
-                                Err(e) => {
-                                    warn!("Gmail batch mark_read failed for {}: {e}", msg.id);
-                                    queue_batch_pending_op(
-                                        &state,
-                                        msg,
-                                        "update_flags",
-                                        json!({ "is_read": is_read, "is_starred": null }),
-                                        &e.to_string(),
-                                    )?;
-                                }
-                            }
-                        }
-                    }
-                    ConnectedProvider::Outlook(provider) => {
-                        for msg in messages {
-                            match provider.update_read_status(&msg.remote_id, is_read).await {
-                                Ok(_) => synced_ids.push(msg.id.clone()),
-                                Err(e) => {
-                                    warn!("Outlook batch mark_read failed for {}: {e}", msg.id);
-                                    queue_batch_pending_op(
-                                        &state,
-                                        msg,
-                                        "update_flags",
-                                        json!({ "is_read": is_read, "is_starred": null }),
-                                        &e.to_string(),
-                                    )?;
-                                }
-                            }
-                        }
-                    }
-                    ConnectedProvider::Imap(imap) => {
-                        for msg in messages {
-                            if let Ok(uid) = parse_imap_uid(&msg.remote_id) {
-                                if let Ok(folder) = find_message_folder(&state, &msg.id, account_id)
-                                {
-                                    match imap
-                                        .set_flags(&folder.remote_id, uid, Some(is_read), None)
-                                        .await
-                                    {
-                                        Ok(_) => synced_ids.push(msg.id.clone()),
-                                        Err(e) => {
-                                            warn!(
-                                                "IMAP batch mark_read failed for {}: {e}",
-                                                msg.id
-                                            );
-                                            queue_batch_pending_op(
-                                                &state,
-                                                msg,
-                                                "update_flags",
-                                                json!({
-                                                    "folder_remote_id": folder.remote_id,
-                                                    "is_read": is_read,
-                                                    "is_starred": null,
-                                                }),
-                                                &e.to_string(),
-                                            )?;
-                                        }
-                                    }
-                                } else {
-                                    queue_batch_pending_op(
-                                        &state,
-                                        msg,
-                                        "update_flags",
-                                        json!({ "is_read": is_read, "is_starred": null }),
-                                        "Source folder lookup failed",
-                                    )?;
-                                }
-                            } else {
-                                queue_batch_pending_op(
-                                    &state,
-                                    msg,
-                                    "update_flags",
-                                    json!({ "is_read": is_read, "is_starred": null }),
-                                    "Invalid IMAP UID",
-                                )?;
-                            }
-                        }
-                    }
-                }
-                conn.disconnect().await;
-            }
-            Err(e) => {
-                let error = e.to_string();
-                for msg in messages {
-                    queue_batch_pending_op(
-                        &state,
-                        msg,
-                        "update_flags",
-                        json!({ "is_read": is_read, "is_starred": null }),
-                        &error,
-                    )?;
-                    queued_for_local_commit_ids.push(msg.id.clone());
-                }
-            }
-        }
+        let targets: Vec<RemoteFlagTarget> = messages
+            .iter()
+            .map(|msg| RemoteFlagTarget::new(msg.id.clone(), msg.remote_id.clone()))
+            .collect();
+        let sync =
+            sync_read_flag_remote(&state, account_id, provider_type, &targets, is_read).await?;
+        synced_ids.extend(sync.succeeded);
+        queued_for_local_commit_ids.extend(sync.queued_for_local_commit);
     }
 
     let ids_to_update =
@@ -660,6 +562,7 @@ pub async fn batch_mark_read(
         success_count,
         message_ids.len()
     );
+    badge::request_refresh(&app);
     Ok(success_count)
 }
 

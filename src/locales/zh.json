@@ -58,6 +58,10 @@
     "emailContent": "邮件内容",
     "welcome": "欢迎使用 Pebble",
     "addAccountHint": "添加邮箱账户以开始使用",
+    "mailboxNotSynced": "该邮箱尚未同步",
+    "mailboxNotSyncedHint": "本地没有找到它的文件夹。点击同步以获取邮件。",
+    "syncNow": "立即同步",
+    "syncing": "同步中...",
     "messageView": "邮件视图",
     "threadView": "会话视图",
     "messageList": "邮件列表"
@@ -448,7 +452,12 @@
     "emptyTrashFailed": "清空废纸篓失败",
     "restore": "恢复",
     "kanbanSuccess": "已加入看板",
-    "kanbanFailed": "加入看板失败"
+    "kanbanFailed": "加入看板失败",
+    "markAllRead": "将 {{account}} 的邮件全部标为已读",
+    "markAllReadShort": "全部标为已读",
+    "markAllReadInProgress": "正在标为已读...",
+    "markAllReadSuccess": "已将 {{account}} 中的 {{count}} 封邮件标为已读",
+    "markAllReadFailed": "标为已读失败"
   },
   "snooze": {
     "failed": "稍后提醒失败",
@@ -526,8 +535,8 @@
     "allowPlaintext": "允许不加密连接（不安全 —— 密码将以明文在网络上传输）",
     "tlsCertificateVerification": "TLS 证书验证",
     "verifyTlsCerts": "验证证书",
-    "accountLabel": "账户备注",
-    "accountLabelHelp": "仅用于在 Pebble 中识别账户，不会作为发件人姓名发送。",
+    "accountLabel": "账户昵称",
+    "accountLabelHelp": "仅用于在 Pebble 中标识此账户，不会作为发件人姓名发送。合并收件箱里会显示在每封邮件上，建议填一个简短好认的名字。",
     "providerManagedName": "发件人姓名由邮箱服务管理，请在服务商的账户设置中修改。",
     "senderNameHelp": "用于发出邮件，请在发送前核对这个姓名。",
     "oauthAddressHelp": "邮箱地址由服务商提供；若这里显示了其他登录地址，可先核对邮箱。",

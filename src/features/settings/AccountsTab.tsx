@@ -23,7 +23,8 @@ import type {
   ConnectionSecurity,
   ImapSyncFolderSettings,
 } from "@/lib/api";
-import { useAccountsQuery, accountsQueryKey } from "@/hooks/queries";
+import { useAccountsQuery, accountsQueryKey, unreadCountForAccount, useAccountUnreadCounts } from "@/hooks/queries";
+import MarkAllReadButton from "@/components/MarkAllReadButton";
 import { useMailStore } from "@/stores/mail.store";
 import { useUIStore, type RealtimeStatus } from "@/stores/ui.store";
 import { useToastStore } from "@/stores/toast.store";
@@ -37,6 +38,7 @@ export default function AccountsTab() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { data: accounts = [] } = useAccountsQuery();
+  const accountUnreadCounts = useAccountUnreadCounts();
   const accountColorsById = useMemo(() => assignAccountColors(accounts), [accounts]);
   const realtimeStatusByAccount = useUIStore((state) => state.realtimeStatusByAccount);
   const [showSetup, setShowSetup] = useState(false);
@@ -180,7 +182,21 @@ export default function AccountsTab() {
                   borderTop: index > 0 ? "1px solid var(--color-border)" : "none",
                 }}
               >
-                <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                {/* `minWidth: 0` lets this column shrink below its content width.
+                    Without it a long single-token line such as a provider error
+                    ("…ACCESS_TOKEN_SCOPE_INSUFFICIENT") widens the column past
+                    the row and pushes the trailing action buttons out of the
+                    list, which has `overflow: hidden` — the delete button then
+                    becomes unreachable. */}
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "2px",
+                    flex: 1,
+                    minWidth: 0,
+                  }}
+                >
                   <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
                     <span
                       aria-hidden="true"
@@ -220,13 +236,27 @@ export default function AccountsTab() {
                       style={{
                         fontSize: "11px",
                         color: "var(--color-text-secondary)",
+                        overflowWrap: "anywhere",
                       }}
                     >
                       {realtimeLabel}
                     </span>
                   )}
                 </div>
-                <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "4px",
+                    alignItems: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  <MarkAllReadButton
+                    accountId={account.id}
+                    accountLabel={accountLabel(account)}
+                    unread={unreadCountForAccount(accountUnreadCounts, account.id)}
+                    variant="labelled"
+                  />
                   <button
                     onClick={() => doTestConnection(account.id)}
                     disabled={testingId === account.id}
@@ -595,6 +625,7 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
           queryClient.invalidateQueries({ queryKey: ["messages"] }),
           queryClient.invalidateQueries({ queryKey: ["threads"] }),
           queryClient.invalidateQueries({ queryKey: ["folder-unread-counts", account.id] }),
+          queryClient.invalidateQueries({ queryKey: ["account-unread-counts"] }),
           queryClient.invalidateQueries({ queryKey: ["starred-messages", account.id] }),
         ]);
       }

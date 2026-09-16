@@ -58,6 +58,10 @@
     "emailContent": "Email content",
     "welcome": "Welcome to Pebble",
     "addAccountHint": "Add an email account to get started",
+    "mailboxNotSynced": "This mailbox has not synced yet",
+    "mailboxNotSyncedHint": "No folders were found for it locally. Sync now to fetch its mail.",
+    "syncNow": "Sync now",
+    "syncing": "Syncing...",
     "messageView": "Message view",
     "threadView": "Thread view",
     "messageList": "Message list"
@@ -448,7 +452,12 @@
     "emptyTrashFailed": "Failed to empty trash",
     "restore": "Restore",
     "kanbanSuccess": "Added to kanban board",
-    "kanbanFailed": "Failed to add to kanban"
+    "kanbanFailed": "Failed to add to kanban",
+    "markAllRead": "Mark all as read in {{account}}",
+    "markAllReadShort": "Mark all as read",
+    "markAllReadInProgress": "Marking as read...",
+    "markAllReadSuccess": "Marked {{count}} messages as read in {{account}}",
+    "markAllReadFailed": "Failed to mark messages as read"
   },
   "snooze": {
     "failed": "Snooze failed",
@@ -527,7 +536,7 @@
     "tlsCertificateVerification": "TLS certificate verification",
     "verifyTlsCerts": "Verify certificates",
     "accountLabel": "Account label",
-    "accountLabelHelp": "Only used to identify this account in Pebble; never sent as your sender name.",
+    "accountLabelHelp": "Only used to identify this account in Pebble; never sent as your sender name. It is shown on every message in the combined inbox, so set a short one to tell your mailboxes apart at a glance.",
     "providerManagedName": "The sender name is managed by your email provider. Change it in the provider’s account settings.",
     "senderNameHelp": "Used in outgoing messages. Check this name before sending.",
     "oauthAddressHelp": "The mailbox address comes from your provider. Verify it here if it shows a different login address.",

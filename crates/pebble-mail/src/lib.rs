@@ -17,11 +17,12 @@ pub mod thread;
 pub use gmail_sync::GmailSyncWorker;
 pub use imap::{
     AccessTokenRefresher, ConnectionSecurity, ImapConfig, ImapProvider, ProxyConfig, SmtpConfig,
+    IMAP_STORE_UID_BATCH,
 };
 pub use outlook_sync::OutlookSyncWorker;
 pub use pop3::{Pop3Config, Pop3MessageRef, Pop3Provider};
 pub use pop3_sync::Pop3SyncWorker;
-pub use provider::gmail::GmailProvider;
+pub use provider::gmail::{GmailProvider, GMAIL_BATCH_MODIFY_LIMIT};
 pub use provider::imap_provider::ImapMailProvider;
 pub use provider::outlook::{should_hide_outlook_folder, OutlookProvider};
 pub use provider::pop3_provider::Pop3MailProvider;

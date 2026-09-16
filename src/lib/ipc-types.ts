@@ -302,6 +302,8 @@ export interface TranslateResult {
 /** @rust pebble-core/src/types.rs → ThreadSummary */
 export interface ThreadSummary {
   thread_id: string;
+  /** Mailbox of the most recent message in the thread (see the Rust side). */
+  account_id: string;
   subject: string;
   snippet: string;
   last_date: number;

@@ -1,3 +1,4 @@
+use crate::badge;
 use crate::commands::indexing;
 use crate::commands::oauth::{
     build_oauth_token_refresher, decode_oauth_account_tokens, gmail_oauth_config,
@@ -141,10 +142,15 @@ async fn start_sync_inner(
         }
     });
 
-    let (progress_tx, mut progress_rx) = mpsc::unbounded_channel();
+    let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<pebble_mail::SyncProgress>();
     let app_for_sync_progress = app.clone();
     tokio::spawn(async move {
         while let Some(sync_progress) = progress_rx.recv().await {
+            // Every completed pass (initial, poll or reconcile) may have changed
+            // the unread count, including flag changes made on another device.
+            if sync_progress.status == "completed" {
+                badge::request_refresh(&app_for_sync_progress);
+            }
             let _ = app_for_sync_progress.emit(events::MAIL_SYNC_PROGRESS, &sync_progress);
         }
     });
@@ -640,8 +646,13 @@ fn build_sync_task(
                 let store = Arc::clone(&refresher_store);
                 let account_id = refresher_account.clone();
                 Box::pin(async move {
-                    crate::commands::xoauth2::ensure_fresh_xoauth2(&crypto, &store, &account_id, None)
-                        .await?;
+                    crate::commands::xoauth2::ensure_fresh_xoauth2(
+                        &crypto,
+                        &store,
+                        &account_id,
+                        None,
+                    )
+                    .await?;
                     let config =
                         crate::commands::messages::load_imap_config(&store, &crypto, &account_id)?;
                     Ok(config.password)

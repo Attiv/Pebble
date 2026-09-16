@@ -5,12 +5,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Inbox, Archive, Trash2, MailOpen, MailCheck, Star, X } from "lucide-react";
 import type { MessageSummary } from "@/lib/api";
 import { getMessageLabelsBatch, batchArchive, batchDelete, batchMarkRead, batchStar } from "@/lib/api";
-import { useAccountsQuery, useFoldersForAccountsQuery } from "@/hooks/queries";
+import { invalidateUnreadViews, useAccountsQuery, useFoldersForAccountsQuery } from "@/hooks/queries";
 import { useMailStore } from "@/stores/mail.store";
 import { useToastStore } from "@/stores/toast.store";
 import { useConfirmStore } from "@/stores/confirm.store";
 import { roleForSelection } from "@/lib/folderAggregation";
-import { assignAccountColors, getAccountColor, getAccountLabel } from "@/lib/accountColors";
+import { accountBadges } from "@/lib/accountIdentity";
 import MessageItem from "./MessageItem";
 import { MessageListSkeleton } from "./Skeleton";
 
@@ -50,12 +50,10 @@ export default function MessageList({
   const activeAccountId = useMailStore((s) => s.activeAccountId);
   const activeFolderId = useMailStore((s) => s.activeFolderId);
   const { data: accounts = [] } = useAccountsQuery();
-  const accountsById = useMemo(
-    () => new Map(accounts.map((account) => [account.id, account])),
-    [accounts],
-  );
-  const accountColorsById = useMemo(() => assignAccountColors(accounts), [accounts]);
-  const showAccountColorMarkers = !activeAccountId && accounts.length > 1;
+  // Built from the whole account list rather than per row, so every mailbox
+  // gets a distinct colour and no row has to do the work again.
+  const accountBadgesById = useMemo(() => accountBadges(accounts), [accounts]);
+  const showAccountBadges = !activeAccountId && accounts.length > 1;
   const folderAccountIds = useMemo(
     () => activeAccountId ? [activeAccountId] : accounts.map((account) => account.id),
     [accounts, activeAccountId],
@@ -151,9 +149,10 @@ export default function MessageList({
       else if (action === "markUnread") count = await batchMarkRead(ids, false);
       else if (action === "star") count = await batchStar(ids, true);
       else count = await batchStar(ids, false);
-      invalidateMessageViews();
       if (batchActionChangesUnreadCounts(action)) {
-        queryClient.invalidateQueries({ queryKey: ["folder-unread-counts"] });
+        invalidateUnreadViews(queryClient);
+      } else {
+        invalidateMessageViews();
       }
       addToast({ message: t("batch.success", { count }), type: "success" });
       clearSelection();
@@ -215,7 +214,6 @@ export default function MessageList({
         >
           {virtualizer.getVirtualItems().map((virtualItem) => {
             const message = messages[virtualItem.index];
-            const account = accountsById.get(message.account_id);
             return (
               <div
                 key={virtualItem.key}
@@ -240,12 +238,9 @@ export default function MessageList({
                   onToggleBatchSelect={toggleMessageSelection}
                   spamFolderId={spamFolderId}
                   folderRole={activeFolderRole}
-                  accountColor={
-                    showAccountColorMarkers
-                      ? accountColorsById.get(message.account_id) ?? getAccountColor(account, message.account_id)
-                      : undefined
+                  accountBadge={
+                    showAccountBadges ? accountBadgesById.get(message.account_id) : undefined
                   }
-                  accountLabel={showAccountColorMarkers ? getAccountLabel(account, message.account_id) : undefined}
                 />
               </div>
             );

@@ -6,7 +6,7 @@ import { useKanbanStore } from "@/stores/kanban.store";
 import { useToastStore } from "@/stores/toast.store";
 import { updateMessageFlags, archiveMessage } from "@/lib/api";
 import { queryClient } from "@/lib/query-client";
-import { patchMessagesCache, findCachedMessage } from "@/hooks/queries";
+import { patchMessagesCache, findCachedMessage, invalidateUnreadViews } from "@/hooks/queries";
 
 export function buildCommands(t: (key: string, defaultValue: string) => string): Command[] {
   return [
@@ -60,9 +60,7 @@ export function buildCommands(t: (key: string, defaultValue: string) => string):
         const id = useMailStore.getState().selectedMessageId;
         if (id) {
           await updateMessageFlags(id, true);
-          queryClient.invalidateQueries({ queryKey: ["messages"] });
-          queryClient.invalidateQueries({ queryKey: ["threads"] });
-          queryClient.invalidateQueries({ queryKey: ["folder-unread-counts"] });
+          invalidateUnreadViews(queryClient);
         }
       },
     },
@@ -74,9 +72,7 @@ export function buildCommands(t: (key: string, defaultValue: string) => string):
         const id = useMailStore.getState().selectedMessageId;
         if (id) {
           await updateMessageFlags(id, false);
-          queryClient.invalidateQueries({ queryKey: ["messages"] });
-          queryClient.invalidateQueries({ queryKey: ["threads"] });
-          queryClient.invalidateQueries({ queryKey: ["folder-unread-counts"] });
+          invalidateUnreadViews(queryClient);
         }
       },
     },
@@ -115,9 +111,7 @@ export function buildCommands(t: (key: string, defaultValue: string) => string):
         try {
           const result = await archiveMessage(id);
           if (result === "skipped") return;
-          queryClient.invalidateQueries({ queryKey: ["messages"] });
-          queryClient.invalidateQueries({ queryKey: ["threads"] });
-          queryClient.invalidateQueries({ queryKey: ["folder-unread-counts"] });
+          invalidateUnreadViews(queryClient);
           const msg = result === "unarchived" ? t("messageActions.unarchiveSuccess", "Message moved to inbox") : t("messageActions.archiveSuccess", "Message archived");
           useToastStore.getState().addToast({ message: msg, type: "success" });
         } catch {

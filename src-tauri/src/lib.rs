@@ -1,4 +1,5 @@
 mod account_colors;
+mod badge;
 mod commands;
 mod events;
 mod profile;
@@ -340,6 +341,8 @@ pub fn run() {
                     .set_background_color(Some(tauri::window::Color(0xf8, 0xf7, 0xf5, 0xff)));
             }
             app.manage(PendingMailtoUrls::default());
+            // Owns the applied-count bookkeeping for the icon badge.
+            app.manage(badge::UnreadBadgeState::new());
 
             let db_path = get_db_path(&app_data)?;
             tracing::info!("Database path: {}", db_path.display());
@@ -491,6 +494,11 @@ pub fn run() {
                 });
             });
             log_startup_phase(startup_start, &mut startup_phase, "background workers scheduled");
+
+            // Seed the icon badge from the local database. Everything after
+            // this point (syncs, flag writes, deletes) requests its own refresh.
+            badge::request_refresh(&app_handle);
+
             tracing::info!(
                 "[startup] tauri setup complete: {}ms total",
                 startup_start.elapsed().as_millis()
@@ -592,6 +600,7 @@ pub fn run() {
             commands::batch::batch_delete,
             commands::batch::batch_mark_read,
             commands::batch::batch_star,
+            commands::mark_all_read::mark_account_all_read,
             commands::cloud_sync::test_webdav_connection,
             commands::cloud_sync::backup_to_webdav,
             commands::cloud_sync::export_backup_file,
@@ -624,6 +633,7 @@ pub fn run() {
             commands::drafts::save_draft,
             commands::drafts::delete_draft,
             commands::folder_counts::get_folder_unread_counts,
+            commands::folder_counts::get_account_unread_counts,
             commands::user_data::list_email_templates,
             commands::user_data::save_email_template,
             commands::user_data::delete_email_template,

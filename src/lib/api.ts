@@ -801,6 +801,22 @@ export async function getFolderUnreadCounts(accountId: string): Promise<Record<s
   return invoke("get_folder_unread_counts", { accountId });
 }
 
+/**
+ * Unread mail per account, keyed by account id. Uses the same scope the app
+ * icon badge counts, so the "mark all as read" affordances can trust it.
+ */
+export async function getAccountUnreadCounts(): Promise<Record<string, number>> {
+  return invoke("get_account_unread_counts");
+}
+
+/**
+ * Mark every unread message of one mailbox as read, locally and on the
+ * provider. Resolves with the number of messages that were cleared.
+ */
+export async function markAccountAllRead(accountId: string): Promise<number> {
+  return invoke<number>("mark_account_all_read", { accountId });
+}
+
 // ─── Autostart API ───────────────────────────────────────────────────────────
 
 /** Whether Pebble is registered to launch when the user logs in. */

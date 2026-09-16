@@ -15,6 +15,7 @@ const mockMailState = {
 
 const threads: ThreadSummary[] = [{
   thread_id: "thread-1",
+  account_id: "account-1",
   subject: "Project update",
   snippet: "The latest project update",
   last_date: 1_700_000_000,
@@ -60,7 +61,20 @@ vi.mock("../../../src/stores/mail.store", () => ({
 }));
 
 vi.mock("../../../src/hooks/queries", () => ({
-  useAccountsQuery: () => ({ data: [{ id: "account-1" }] }),
+  useAccountsQuery: () => ({
+    data: [
+      {
+        id: "account-1",
+        email: "work@example.com",
+        display_name: "Work",
+        account_label: "Work",
+        color: null,
+        provider: "imap",
+        created_at: 1,
+        updated_at: 1,
+      },
+    ],
+  }),
   useFoldersForAccountsQuery: () => ({
     data: [{ id: "folder-inbox", role: "inbox" }],
   }),

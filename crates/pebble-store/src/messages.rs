@@ -7,6 +7,32 @@ use crate::Store;
 
 pub type FolderRemoteMessageState = (String, String, bool, bool, i64);
 
+/// SQL predicate selecting the messages that count as a mailbox's unread mail:
+/// unread, not soft-deleted, and carrying at least one folder that is not
+/// drafts, trash or spam.
+///
+/// A message with several folders (Gmail labels, indexed mirrors) is excluded
+/// only when every one of its folders is junk, so a mail filed in both Spam and
+/// Inbox is still counted once. `m` must be the `messages` alias.
+const UNREAD_MAIL_PREDICATE: &str = "m.is_read = 0
+     AND m.is_deleted = 0
+     AND NOT EXISTS (
+        SELECT 1 FROM message_folders mf_junk
+          JOIN folders f_junk ON f_junk.id = mf_junk.folder_id
+         WHERE mf_junk.message_id = m.id AND f_junk.role IN ('trash', 'spam', 'drafts')
+     )";
+
+/// One unread message of an account, resolved far enough to write its read
+/// flag back to the provider.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnreadMessageRef {
+    pub message_id: String,
+    /// Provider-side identifier of the message (IMAP uid, Gmail/Outlook id).
+    pub remote_id: String,
+    pub folder_id: Option<String>,
+    pub folder_remote_id: Option<String>,
+}
+
 #[derive(Debug)]
 pub struct ImapFolderSnapshotMessage {
     pub message: Message,
@@ -1563,7 +1589,8 @@ impl Store {
                         SUM(CASE WHEN m.is_read = 0 THEN 1 ELSE 0 END) as unread_count,
                         MAX(m.is_starred) as is_starred,
                         COALESCE(tp.participants, '') as participants,
-                        MAX(m.has_attachments) as has_attachments
+                        MAX(m.has_attachments) as has_attachments,
+                        MAX(CASE WHEN m.date = max_date.md THEN m.account_id ELSE '' END) as account_id
                      FROM messages m
                      JOIN message_folders mf ON m.id = mf.message_id
                      JOIN (
@@ -1593,6 +1620,7 @@ impl Store {
                 let has_attachments: i32 = row.get(8)?;
                 Ok(pebble_core::ThreadSummary {
                     thread_id: row.get(0)?,
+                    account_id: row.get(9)?,
                     subject: row.get(1)?,
                     snippet: row.get(2)?,
                     last_date: row.get(3)?,
@@ -1642,7 +1670,8 @@ impl Store {
                                m.is_read,
                                m.is_starred,
                                m.from_address,
-                               m.has_attachments
+                               m.has_attachments,
+                               m.account_id
                         FROM messages m
                         JOIN message_folders mf ON m.id = mf.message_id
                         WHERE mf.folder_id IN ({})
@@ -1672,7 +1701,8 @@ impl Store {
                         SUM(CASE WHEN sm.is_read = 0 THEN 1 ELSE 0 END) AS unread_count,
                         MAX(sm.is_starred) AS is_starred,
                         COALESCE(tp.participants, '') AS participants,
-                        MAX(sm.has_attachments) AS has_attachments
+                        MAX(sm.has_attachments) AS has_attachments,
+                        MAX(CASE WHEN sm.date = max_date.md THEN sm.account_id ELSE '' END) AS account_id
                      FROM selected_messages sm
                      JOIN max_date ON sm.thread_id = max_date.thread_id
                      LEFT JOIN thread_participants tp ON sm.thread_id = tp.thread_id
@@ -1705,6 +1735,7 @@ impl Store {
                 let has_attachments: i32 = row.get(8)?;
                 Ok(pebble_core::ThreadSummary {
                     thread_id: row.get(0)?,
+                    account_id: row.get(9)?,
                     subject: row.get(1)?,
                     snippet: row.get(2)?,
                     last_date: row.get(3)?,
@@ -1831,6 +1862,72 @@ impl Store {
                 counts.insert(fid, count);
             }
             Ok(counts)
+        })
+    }
+
+    /// Count the unread mail of every account: unread, not deleted, and not
+    /// living only in a junk folder (see [`UNREAD_MAIL_PREDICATE`]).
+    ///
+    /// The unread badge sums this, and the per-account "mark all as read"
+    /// actions use the same scope, so the number a user sees always matches
+    /// the number that gets cleared.
+    pub fn get_unread_counts_by_account(&self) -> Result<Vec<(String, u32)>> {
+        self.with_read(|conn| {
+            let sql = format!(
+                "SELECT m.account_id, COUNT(*)
+                 FROM messages m
+                 WHERE {UNREAD_MAIL_PREDICATE}
+                 GROUP BY m.account_id"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+            })?;
+            let mut counts = Vec::new();
+            for row in rows {
+                counts.push(row?);
+            }
+            Ok(counts)
+        })
+    }
+
+    /// List every unread mail of one account together with the folder a remote
+    /// flag write must target. Used by the account-wide "mark all as read"
+    /// action, which fans out to the provider in bulk.
+    ///
+    /// `folder_id` and `folder_remote_id` are resolved by the same ordered
+    /// subquery (`sort_order`, then `id`), so an IMAP `STORE` never lands in a
+    /// different mailbox than the one whose uid it carries.
+    pub fn list_unread_message_refs(&self, account_id: &str) -> Result<Vec<UnreadMessageRef>> {
+        self.with_read(|conn| {
+            let sql = format!(
+                "SELECT m.id, m.remote_id,
+                        (SELECT f.id FROM message_folders mf
+                           JOIN folders f ON f.id = mf.folder_id
+                          WHERE mf.message_id = m.id
+                          ORDER BY f.sort_order ASC, f.id ASC LIMIT 1),
+                        (SELECT f.remote_id FROM message_folders mf
+                           JOIN folders f ON f.id = mf.folder_id
+                          WHERE mf.message_id = m.id
+                          ORDER BY f.sort_order ASC, f.id ASC LIMIT 1)
+                 FROM messages m
+                 WHERE m.account_id = ?1 AND {UNREAD_MAIL_PREDICATE}
+                 ORDER BY m.date DESC, m.id ASC"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(params![account_id], |row| {
+                Ok(UnreadMessageRef {
+                    message_id: row.get(0)?,
+                    remote_id: row.get(1)?,
+                    folder_id: row.get(2)?,
+                    folder_remote_id: row.get(3)?,
+                })
+            })?;
+            let mut refs = Vec::new();
+            for row in rows {
+                refs.push(row?);
+            }
+            Ok(refs)
         })
     }
 }
@@ -2794,6 +2891,10 @@ mod thread_listing_tests {
         let t = &threads[0];
         assert_eq!(t.message_count, 3);
         assert_eq!(t.unread_count, 3);
+        assert_eq!(
+            t.account_id, account_id,
+            "the row must carry the mailbox the thread belongs to"
+        );
         let mut parts = t.participants.clone();
         parts.sort();
         assert_eq!(
@@ -2803,6 +2904,39 @@ mod thread_listing_tests {
                 "bob@example.com".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn list_threads_labels_a_thread_with_the_account_of_its_newest_message() {
+        let store = Store::open_in_memory().unwrap();
+        let (first_account_id, first_folder_id) = seed_account_and_folder(&store);
+        let (second_account_id, second_folder_id) = seed_account_and_folder(&store);
+        let thread_id = new_id();
+
+        let base = now_timestamp();
+        // The thread opens in one mailbox and is answered in another. The
+        // combined inbox shows a single row for it, so it has to be attributed
+        // to whichever mailbox spoke last rather than to an arbitrary one.
+        let older = make_msg(
+            &first_account_id,
+            &thread_id,
+            "alice@example.com",
+            base - 100,
+        );
+        let newer = make_msg(&second_account_id, &thread_id, "bob@example.com", base);
+        store
+            .insert_message(&older, std::slice::from_ref(&first_folder_id))
+            .unwrap();
+        store
+            .insert_message(&newer, std::slice::from_ref(&second_folder_id))
+            .unwrap();
+
+        let threads = store
+            .list_threads_by_folders(&[first_folder_id, second_folder_id], 50, 0)
+            .expect("list_threads_by_folders should succeed");
+
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0].account_id, second_account_id);
     }
 
     #[test]
@@ -2840,5 +2974,208 @@ mod thread_listing_tests {
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].message_count, 2);
         assert_eq!(threads[0].snippet, format!("snippet-{base}"));
+    }
+}
+
+#[cfg(test)]
+mod unread_mail_scope_tests {
+    use crate::Store;
+    use pebble_core::*;
+
+    fn make_account(store: &Store, email: &str) -> String {
+        let account = Account {
+            account_label: None,
+            provider_display_name: None,
+            id: new_id(),
+            email: email.to_string(),
+            display_name: "Tester".to_string(),
+            color: None,
+            provider: ProviderType::Imap,
+            created_at: now_timestamp(),
+            updated_at: now_timestamp(),
+        };
+        store.insert_account(&account).unwrap();
+        account.id
+    }
+
+    fn make_folder(
+        store: &Store,
+        account_id: &str,
+        remote_id: &str,
+        role: Option<FolderRole>,
+        sort_order: i32,
+    ) -> String {
+        let is_system = role.is_some();
+        let folder = Folder {
+            id: new_id(),
+            account_id: account_id.to_string(),
+            remote_id: remote_id.to_string(),
+            name: remote_id.to_string(),
+            folder_type: FolderType::Folder,
+            role,
+            parent_id: None,
+            color: None,
+            is_system,
+            sort_order,
+        };
+        store.insert_folder(&folder).unwrap();
+        folder.id
+    }
+
+    fn make_message(
+        account_id: &str,
+        remote_id: &str,
+        is_read: bool,
+        is_deleted: bool,
+        date: i64,
+    ) -> Message {
+        let now = now_timestamp();
+        Message {
+            id: new_id(),
+            account_id: account_id.to_string(),
+            remote_id: remote_id.to_string(),
+            message_id_header: None,
+            in_reply_to: None,
+            references_header: None,
+            thread_id: None,
+            subject: "Subject".to_string(),
+            snippet: "snippet".to_string(),
+            from_address: "sender@example.com".to_string(),
+            from_name: "Sender".to_string(),
+            to_list: vec![],
+            cc_list: vec![],
+            bcc_list: vec![],
+            body_text: "body".to_string(),
+            body_html_raw: "<p>body</p>".to_string(),
+            has_attachments: false,
+            is_read,
+            is_starred: false,
+            is_draft: false,
+            date,
+            remote_version: None,
+            is_deleted,
+            deleted_at: if is_deleted { Some(now) } else { None },
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn unread_counts_skip_read_deleted_and_junk_only_messages() {
+        let store = Store::open_in_memory().unwrap();
+        let account_id = make_account(&store, "scope@example.com");
+        let inbox = make_folder(&store, &account_id, "INBOX", Some(FolderRole::Inbox), 0);
+        let spam = make_folder(&store, &account_id, "Spam", Some(FolderRole::Spam), 4);
+        let archive = make_folder(&store, &account_id, "Archive", Some(FolderRole::Archive), 2);
+        let base = now_timestamp();
+
+        let unread_a = make_message(&account_id, "1", false, false, base);
+        let unread_b = make_message(&account_id, "2", false, false, base - 1);
+        let read = make_message(&account_id, "3", true, false, base - 2);
+        let deleted = make_message(&account_id, "4", false, true, base - 3);
+        let junk_only = make_message(&account_id, "5", false, false, base - 4);
+
+        store
+            .insert_message(&unread_a, std::slice::from_ref(&inbox))
+            .unwrap();
+        store
+            .insert_message(&unread_b, std::slice::from_ref(&archive))
+            .unwrap();
+        store
+            .insert_message(&read, std::slice::from_ref(&inbox))
+            .unwrap();
+        store
+            .insert_message(&deleted, std::slice::from_ref(&inbox))
+            .unwrap();
+        store
+            .insert_message(&junk_only, std::slice::from_ref(&spam))
+            .unwrap();
+
+        assert_eq!(
+            store.get_unread_counts_by_account().unwrap(),
+            vec![(account_id.clone(), 2)]
+        );
+
+        let refs = store.list_unread_message_refs(&account_id).unwrap();
+        let ids: Vec<&str> = refs.iter().map(|r| r.message_id.as_str()).collect();
+        assert_eq!(ids, vec![unread_a.id.as_str(), unread_b.id.as_str()]);
+        assert_eq!(refs[0].remote_id, "1");
+        assert_eq!(refs[1].remote_id, "2");
+    }
+
+    #[test]
+    fn unread_counts_stay_separate_per_account() {
+        let store = Store::open_in_memory().unwrap();
+        let first = make_account(&store, "first@example.com");
+        let second = make_account(&store, "second@example.com");
+        let first_inbox = make_folder(&store, &first, "INBOX", Some(FolderRole::Inbox), 0);
+        let second_inbox = make_folder(&store, &second, "INBOX", Some(FolderRole::Inbox), 0);
+
+        store
+            .insert_message(
+                &make_message(&first, "10", false, false, now_timestamp()),
+                std::slice::from_ref(&first_inbox),
+            )
+            .unwrap();
+        for remote_id in ["20", "21"] {
+            store
+                .insert_message(
+                    &make_message(&second, remote_id, false, false, now_timestamp()),
+                    std::slice::from_ref(&second_inbox),
+                )
+                .unwrap();
+        }
+
+        let mut counts = store.get_unread_counts_by_account().unwrap();
+        counts.sort();
+        // Account ids are random UUIDs, so the sorted order does not match
+        // insertion order. Sort the expectation the same way instead of relying
+        // on which UUID happens to sort first.
+        let mut expected = vec![(first, 1), (second, 2)];
+        expected.sort();
+        assert_eq!(counts, expected);
+    }
+
+    #[test]
+    fn unread_refs_resolve_one_folder_and_survive_missing_folders() {
+        let store = Store::open_in_memory().unwrap();
+        let account_id = make_account(&store, "folders@example.com");
+        let label = make_folder(&store, &account_id, "Label", None, 9);
+        let inbox = make_folder(&store, &account_id, "INBOX", Some(FolderRole::Inbox), 0);
+        let orphan = make_folder(&store, &account_id, "Orphan", None, 0);
+
+        let tagged = make_message(&account_id, "30", false, false, now_timestamp());
+        let no_folder = make_message(&account_id, "31", false, false, now_timestamp() - 1);
+        let custom = make_message(&account_id, "32", false, false, now_timestamp() - 2);
+
+        store
+            .insert_message(&tagged, &[label.clone(), inbox.clone()])
+            .unwrap();
+        store.insert_message(&no_folder, &[]).unwrap();
+        store
+            .insert_message(&custom, std::slice::from_ref(&orphan))
+            .unwrap();
+
+        let refs = store.list_unread_message_refs(&account_id).unwrap();
+        let tagged_ref = refs
+            .iter()
+            .find(|r| r.message_id == tagged.id)
+            .expect("multi-folder message should be listed");
+        // Both folder fields must come from the same (lowest sort_order) folder.
+        assert_eq!(tagged_ref.folder_id.as_deref(), Some(inbox.as_str()));
+        assert_eq!(tagged_ref.folder_remote_id.as_deref(), Some("INBOX"));
+
+        let custom_ref = refs
+            .iter()
+            .find(|r| r.message_id == custom.id)
+            .expect("a message in a custom folder is still unread mail");
+        assert_eq!(custom_ref.folder_remote_id.as_deref(), Some("Orphan"));
+
+        let orphan_ref = refs
+            .iter()
+            .find(|r| r.message_id == no_folder.id)
+            .expect("a message without folders still has an unread flag");
+        assert!(orphan_ref.folder_id.is_none());
+        assert!(orphan_ref.folder_remote_id.is_none());
     }
 }

@@ -25,6 +25,12 @@ export {
   pendingMailOpsSummaryQueryKey,
 } from "./usePendingMailOpsSummary";
 export {
+  useAccountUnreadCounts,
+  unreadCountForAccount,
+  invalidateUnreadViews,
+  accountUnreadCountsQueryKey,
+} from "./useAccountUnreadCounts";
+export {
   usePendingMailOpsQuery,
   pendingMailOpsQueryKey,
 } from "./usePendingMailOpsQuery";

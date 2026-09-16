@@ -14,8 +14,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { List, MessageSquare, Mail, Trash2, Inbox, CheckSquare } from "lucide-react";
 import { MessageListSkeleton } from "@/components/Skeleton";
-import { emptyTrash } from "@/lib/api";
+import { emptyTrash, triggerSync } from "@/lib/api";
+import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import { folderIdsForSelection, roleForSelection } from "@/lib/folderAggregation";
+import { accountBadges, type AccountBadgeInfo } from "@/lib/accountIdentity";
 import type { ThreadSummary } from "@/lib/api";
 
 const EMPTY_THREADS: ThreadSummary[] = [];
@@ -32,6 +34,9 @@ export default function InboxView() {
   const selectedThreadId = useMailStore((s) => s.selectedThreadId);
   const setSelectedThreadId = useMailStore((s) => s.setSelectedThreadId);
   const { data: accounts = [] } = useAccountsQuery();
+  // Only the combined inbox mixes mailboxes, so only it needs to label rows.
+  const showAccountBadges = !activeAccountId && accounts.length > 1;
+  const accountBadgesById = useMemo(() => accountBadges(accounts), [accounts]);
   const folderAccountIds = useMemo(
     () => activeAccountId ? [activeAccountId] : accounts.map((account) => account.id),
     [accounts, activeAccountId],
@@ -40,6 +45,30 @@ export default function InboxView() {
   const queryClient = useQueryClient();
   const addToast = useToastStore((s) => s.addToast);
   const [showTrashConfirm, setShowTrashConfirm] = useState(false);
+  const [syncingMailbox, setSyncingMailbox] = useState(false);
+
+  // Shown when the selected mailbox has no folders locally, which means its first
+  // sync either never ran or did not finish.
+  const syncMailbox = useCallback(async () => {
+    const targets = activeAccountId ? [activeAccountId] : accounts.map((account) => account.id);
+    if (targets.length === 0) return;
+    setSyncingMailbox(true);
+    try {
+      for (const accountId of targets) {
+        await triggerSync(accountId, "manual");
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["folders"] }),
+        queryClient.invalidateQueries({ queryKey: ["messages"] }),
+        queryClient.invalidateQueries({ queryKey: ["threads"] }),
+        queryClient.invalidateQueries({ queryKey: ["account-unread-counts"] }),
+      ]);
+    } catch (err) {
+      addToast({ message: extractErrorMessage(err), type: "error" });
+    } finally {
+      setSyncingMailbox(false);
+    }
+  }, [activeAccountId, accounts, queryClient, addToast]);
 
   const activeFolderRole = roleForSelection(activeFolderId, folders);
   const isTrashFolder = activeFolderRole === "trash";
@@ -74,13 +103,20 @@ export default function InboxView() {
 
   const detailOpen = threadView ? selectedThreadId !== null : selectedMessageId !== null;
 
-  // No accounts or no folder selected — show welcome / setup prompt
-  if (accounts.length === 0 || !activeFolderId) {
+  const emptyStateStyle: React.CSSProperties = {
+    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+    height: "100%", gap: "16px", color: "var(--color-text-secondary)",
+  };
+  const primaryButtonStyle: React.CSSProperties = {
+    marginTop: "8px", padding: "8px 20px", borderRadius: "6px",
+    border: "none", backgroundColor: "var(--color-accent)", color: "#fff",
+    fontSize: "13px", fontWeight: 600, cursor: "pointer",
+  };
+
+  // Nothing configured at all — welcome / setup prompt.
+  if (accounts.length === 0) {
     return (
-      <div className="fade-in" style={{
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        height: "100%", gap: "16px", color: "var(--color-text-secondary)",
-      }}>
+      <div className="fade-in" style={emptyStateStyle}>
         <Mail size={48} strokeWidth={1.2} />
         <p style={{ fontSize: "16px", fontWeight: 500, color: "var(--color-text-primary)", margin: 0 }}>
           {t("inbox.welcome", "Welcome to Pebble")}
@@ -88,15 +124,41 @@ export default function InboxView() {
         <p style={{ fontSize: "13px", margin: 0 }}>
           {t("inbox.addAccountHint", "Add an email account to get started")}
         </p>
+        <button onClick={() => setActiveView("settings")} style={primaryButtonStyle}>
+          {t("settings.addAccount", "Add Account")}
+        </button>
+      </div>
+    );
+  }
+
+  if (!activeFolderId) {
+    // Folders exist, so the sidebar is one render away from auto-selecting one.
+    if (folders.length > 0) {
+      return <MessageListSkeleton />;
+    }
+    // No folders at all: this mailbox has never finished a sync. Asking the user
+    // to add an account they already configured would send them in circles.
+    return (
+      <div className="fade-in" style={emptyStateStyle}>
+        <Mail size={48} strokeWidth={1.2} />
+        <p style={{ fontSize: "16px", fontWeight: 500, color: "var(--color-text-primary)", margin: 0 }}>
+          {t("inbox.mailboxNotSynced", "This mailbox has not synced yet")}
+        </p>
+        <p style={{ fontSize: "13px", margin: 0, textAlign: "center", maxWidth: "340px" }}>
+          {t("inbox.mailboxNotSyncedHint", "No folders were found for it locally. Sync now to fetch its mail.")}
+        </p>
         <button
-          onClick={() => setActiveView("settings")}
+          onClick={syncMailbox}
+          disabled={syncingMailbox}
           style={{
-            marginTop: "8px", padding: "8px 20px", borderRadius: "6px",
-            border: "none", backgroundColor: "var(--color-accent)", color: "#fff",
-            fontSize: "13px", fontWeight: 600, cursor: "pointer",
+            ...primaryButtonStyle,
+            cursor: syncingMailbox ? "default" : "pointer",
+            opacity: syncingMailbox ? 0.6 : 1,
           }}
         >
-          {t("settings.addAccount", "Add Account")}
+          {syncingMailbox
+            ? t("inbox.syncing", "Syncing...")
+            : t("inbox.syncNow", "Sync now")}
         </button>
       </div>
     );
@@ -183,6 +245,7 @@ export default function InboxView() {
               selectedThreadId={selectedThreadId}
               onSelectThread={setSelectedThreadId}
               loading={loadingThreads}
+              accountBadgesById={showAccountBadges ? accountBadgesById : undefined}
             />
           ) : (
             <MessageList
@@ -218,11 +281,13 @@ export default function InboxView() {
 }
 
 // Inline ThreadList component using virtualizer
-function ThreadList({ threads, selectedThreadId, onSelectThread, loading }: {
-  threads: { thread_id: string; subject: string; snippet: string; last_date: number; message_count: number; unread_count: number; is_starred: boolean; participants: string[]; has_attachments: boolean }[];
+function ThreadList({ threads, selectedThreadId, onSelectThread, loading, accountBadgesById }: {
+  threads: ThreadSummary[];
   selectedThreadId: string | null;
   onSelectThread: (id: string) => void;
   loading: boolean;
+  /** Absent when a single mailbox is selected, where labelling every row is noise. */
+  accountBadgesById?: Map<string, AccountBadgeInfo>;
 }) {
   const { t } = useTranslation();
   const parentRef = useRef<HTMLDivElement>(null);
@@ -279,6 +344,7 @@ function ThreadList({ threads, selectedThreadId, onSelectThread, loading }: {
                 thread={thread}
                 isSelected={thread.thread_id === selectedThreadId}
                 onClick={() => onSelectThread(thread.thread_id)}
+                accountBadge={accountBadgesById?.get(thread.account_id)}
               />
             </div>
           );

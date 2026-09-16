@@ -1,3 +1,4 @@
+use crate::badge;
 use crate::state::AppState;
 use pebble_core::traits::LabelProvider;
 use pebble_core::{Message, PebbleError, ProviderType};
@@ -29,6 +30,7 @@ enum WritebackInfo {
 
 #[tauri::command]
 pub async fn update_message_flags(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     message_id: String,
     is_read: Option<bool>,
@@ -310,6 +312,10 @@ pub async fn update_message_flags(
     })
     .await
     .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))??;
+
+    if is_read.is_some() {
+        badge::request_refresh(&app);
+    }
 
     Ok(())
 }

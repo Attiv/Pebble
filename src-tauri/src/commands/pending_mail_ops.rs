@@ -1,5 +1,5 @@
 use crate::commands::attachments::cleanup_staged_attachment_records;
-use crate::{events, state::AppState};
+use crate::{badge, events, state::AppState};
 use pebble_core::traits::{FolderProvider, LabelProvider};
 use pebble_core::{FolderRole, Message, PebbleError, ProviderType};
 use pebble_store::pending_ops::{PendingMailOp, PendingMailOpsSummary};
@@ -189,6 +189,10 @@ pub async fn process_pending_mail_ops(
 
     if changed {
         emit_pending_ops_changed(app);
+        // A retried write may have just cleared an unread flag locally.
+        if let Some(app) = app {
+            badge::request_refresh(app);
+        }
     }
     Ok(completed)
 }

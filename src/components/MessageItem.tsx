@@ -3,10 +3,12 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Star, Paperclip, Archive, LayoutGrid, ShieldAlert, RotateCcw } from "lucide-react";
 import type { EmailAddress, Folder, Label, MessageSummary } from "@/lib/api";
+import type { AccountBadgeInfo } from "@/lib/accountIdentity";
 import { updateMessageFlags, archiveMessage, moveToFolder } from "@/lib/api";
 import { useKanbanStore } from "@/stores/kanban.store";
 import { useToastStore } from "@/stores/toast.store";
-import { patchMessagesCache, restoreMessagesCache, snapshotMessagesCache } from "@/hooks/queries";
+import AccountBadge from "./AccountBadge";
+import { invalidateUnreadViews, patchMessagesCache, restoreMessagesCache, snapshotMessagesCache } from "@/hooks/queries";
 
 interface Props {
   message: MessageSummary;
@@ -19,8 +21,8 @@ interface Props {
   onToggleBatchSelect?: (messageId: string) => void;
   spamFolderId?: string;
   folderRole?: Folder["role"];
-  accountColor?: string;
-  accountLabel?: string;
+  /** Only supplied by the combined inbox, where rows come from many mailboxes. */
+  accountBadge?: AccountBadgeInfo;
 }
 
 function formatDate(timestamp: number): string {
@@ -46,7 +48,7 @@ function recipientLabel(addresses: EmailAddress[]): string {
   return addresses.map(addressLabel).filter(Boolean).join(", ");
 }
 
-function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, batchMode, batchSelected, onToggleBatchSelect, spamFolderId, folderRole, accountColor, accountLabel }: Props) {
+function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, batchMode, batchSelected, onToggleBatchSelect, spamFolderId, folderRole, accountBadge }: Props) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [showActions, setShowActions] = useState(false);
@@ -61,11 +63,12 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
     : message.from_name || message.from_address;
 
   function invalidateMessageViews(includeUnreadCounts = false) {
+    if (includeUnreadCounts) {
+      invalidateUnreadViews(queryClient);
+      return;
+    }
     queryClient.invalidateQueries({ queryKey: ["messages"] });
     queryClient.invalidateQueries({ queryKey: ["threads"] });
-    if (includeUnreadCounts) {
-      queryClient.invalidateQueries({ queryKey: ["folder-unread-counts"] });
-    }
   }
 
   return (
@@ -109,10 +112,13 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
         }
       }}
     >
-      {accountColor && (
+      {/* Decorative companion to the badge below: a colour to scan down the
+          list by, while the badge spells the mailbox out. Hidden from
+          assistive tech so the row is announced once, not twice. */}
+      {accountBadge && (
         <span
-          aria-label={accountLabel}
-          title={accountLabel}
+          aria-hidden="true"
+          data-testid="account-color-bar"
           style={{
             position: "absolute",
             left: 0,
@@ -120,7 +126,7 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
             bottom: "10px",
             width: "3px",
             borderRadius: "0 3px 3px 0",
-            backgroundColor: accountColor,
+            backgroundColor: accountBadge.color,
           }}
         />
       )}
@@ -151,6 +157,7 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
             minWidth: 0,
           }}
         >
+          {accountBadge && <AccountBadge badge={accountBadge} />}
           <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
             {primaryContact}
           </span>

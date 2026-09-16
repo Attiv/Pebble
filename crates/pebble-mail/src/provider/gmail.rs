@@ -853,6 +853,49 @@ impl LabelProvider for GmailProvider {
     }
 }
 
+/// Gmail rejects `batchModify` above this many ids in one request.
+pub const GMAIL_BATCH_MODIFY_LIMIT: usize = 1000;
+
+impl GmailProvider {
+    /// Apply the same label change to many messages with one API call.
+    ///
+    /// The account-wide "mark all as read" action uses this instead of looping
+    /// over `modify_labels`, which turns a thousand unread messages from a
+    /// thousand round trips into one. Callers must chunk with
+    /// [`GMAIL_BATCH_MODIFY_LIMIT`]; an empty `remote_ids` is a no-op.
+    pub async fn batch_modify_messages(
+        &self,
+        remote_ids: &[String],
+        add: &[String],
+        remove: &[String],
+    ) -> Result<()> {
+        if remote_ids.is_empty() {
+            return Ok(());
+        }
+        if remote_ids.len() > GMAIL_BATCH_MODIFY_LIMIT {
+            return Err(PebbleError::Validation(format!(
+                "Gmail batchModify accepts at most {GMAIL_BATCH_MODIFY_LIMIT} messages, got {}",
+                remote_ids.len()
+            )));
+        }
+
+        let body = serde_json::json!({
+            "ids": remote_ids,
+            "addLabelIds": add,
+            "removeLabelIds": remove,
+        });
+        let url = format!("{GMAIL_API_BASE}/messages/batchModify");
+        let resp = self.post_json(&url, &body).await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            return Err(PebbleError::Network(format!(
+                "Failed to batch modify labels (status {status})"
+            )));
+        }
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl DraftProvider for GmailProvider {
     async fn save_draft(&self, draft: &DraftMessage) -> Result<String> {

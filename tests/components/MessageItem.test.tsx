@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   patchMessagesCache: vi.fn(),
   snapshotMessagesCache: vi.fn(),
   restoreMessagesCache: vi.fn(),
+  invalidateUnreadViews: vi.fn(),
   updateMessageFlags: vi.fn(),
   archiveMessage: vi.fn(),
   moveToFolder: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock("../../src/hooks/queries", () => ({
   patchMessagesCache: mocks.patchMessagesCache,
   snapshotMessagesCache: mocks.snapshotMessagesCache,
   restoreMessagesCache: mocks.restoreMessagesCache,
+  invalidateUnreadViews: mocks.invalidateUnreadViews,
 }));
 
 vi.mock("../../src/lib/api", () => ({
@@ -171,7 +173,7 @@ describe("MessageItem", () => {
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
 
     await waitFor(() => expect(mocks.archiveMessage).toHaveBeenCalledWith("message-1"));
-    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
+    expect(mocks.invalidateUnreadViews).toHaveBeenCalledWith(mocks.queryClient);
   });
 
   it("refreshes folder unread counts after a successful spam action", async () => {
@@ -188,7 +190,7 @@ describe("MessageItem", () => {
     fireEvent.click(screen.getByRole("button", { name: "Report spam" }));
 
     await waitFor(() => expect(mocks.moveToFolder).toHaveBeenCalledWith("message-1", "folder-spam"));
-    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
+    expect(mocks.invalidateUnreadViews).toHaveBeenCalledWith(mocks.queryClient);
   });
 
   it("refreshes derived queries after starring from row actions", async () => {
@@ -261,23 +263,50 @@ describe("MessageItem", () => {
     expect(onToggleBatchSelect).toHaveBeenCalledWith("message-1");
   });
 
-  it("shows the source account color marker when an account color is provided", () => {
+  it("names the source mailbox when the combined inbox supplies a badge", () => {
     render(
       <MessageItem
         message={makeMessage()}
         isSelected={false}
         onClick={vi.fn()}
-        {...({
-          accountColor: "#22c55e",
-          accountLabel: "Work <work@example.com>",
-        } as Record<string, unknown>)}
+        accountBadge={{ color: "#22c55e", label: "Work", title: "Work · work@example.com" }}
       />,
     );
 
-    const marker = screen.getByTitle("Work <work@example.com>");
+    const badge = screen.getByTestId("account-badge");
 
-    expect(marker.getAttribute("aria-label")).toBe("Work <work@example.com>");
-    expect(marker.style.backgroundColor).toBe("rgb(34, 197, 94)");
+    expect(badge.textContent).toBe("Work");
+    expect(badge.getAttribute("title")).toBe("Work · work@example.com");
+    expect(screen.getByTestId("account-badge-dot").style.backgroundColor).toBe("rgb(34, 197, 94)");
+  });
+
+  it("keeps the account colour bar decorative so the row is announced once", () => {
+    render(
+      <MessageItem
+        message={makeMessage()}
+        isSelected={false}
+        onClick={vi.fn()}
+        accountBadge={{ color: "#22c55e", label: "Work", title: "Work · work@example.com" }}
+      />,
+    );
+
+    const bar = screen.getByTestId("account-color-bar");
+
+    expect(bar.getAttribute("aria-hidden")).toBe("true");
+    expect(bar.style.backgroundColor).toBe("rgb(34, 197, 94)");
+  });
+
+  it("leaves rows from a single mailbox unlabelled", () => {
+    render(
+      <MessageItem
+        message={makeMessage()}
+        isSelected={false}
+        onClick={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId("account-badge")).toBeNull();
+    expect(screen.queryByTestId("account-color-bar")).toBeNull();
   });
 
   it("marks unread rows with a row class", () => {

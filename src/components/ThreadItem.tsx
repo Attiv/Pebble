@@ -2,11 +2,15 @@ import { memo } from "react";
 import { Star, Paperclip } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ThreadSummary } from "@/lib/api";
+import type { AccountBadgeInfo } from "@/lib/accountIdentity";
+import AccountBadge from "./AccountBadge";
 
 interface Props {
   thread: ThreadSummary;
   isSelected: boolean;
   onClick: () => void;
+  /** Only supplied by the combined inbox, where rows come from many mailboxes. */
+  accountBadge?: AccountBadgeInfo;
 }
 
 function formatDate(timestamp: number): string {
@@ -22,7 +26,7 @@ function formatDate(timestamp: number): string {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-function ThreadItem({ thread, isSelected, onClick }: Props) {
+function ThreadItem({ thread, isSelected, onClick, accountBadge }: Props) {
   const { t } = useTranslation();
   const hasUnread = thread.unread_count > 0;
   const fontWeight = hasUnread ? "600" : "normal";
@@ -38,6 +42,7 @@ function ThreadItem({ thread, isSelected, onClick }: Props) {
       onClick={onClick}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
       style={{
+        position: "relative",
         color: "var(--color-text-primary)",
         fontWeight,
         cursor: "pointer",
@@ -49,6 +54,24 @@ function ThreadItem({ thread, isSelected, onClick }: Props) {
         transition: "background-color 0.12s ease",
       }}
     >
+      {/* Decorative companion to the badge below: a colour to scan down the
+          list by, while the badge spells the mailbox out. Hidden from
+          assistive tech so the row is announced once, not twice. */}
+      {accountBadge && (
+        <span
+          aria-hidden="true"
+          data-testid="account-color-bar"
+          style={{
+            position: "absolute",
+            left: 0,
+            top: "10px",
+            bottom: "10px",
+            width: "3px",
+            borderRadius: "0 3px 3px 0",
+            backgroundColor: accountBadge.color,
+          }}
+        />
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2px" }}>
         <span
           style={{
@@ -63,6 +86,7 @@ function ThreadItem({ thread, isSelected, onClick }: Props) {
             minWidth: 0,
           }}
         >
+          {accountBadge && <AccountBadge badge={accountBadge} />}
           <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
             {participantText}
             {thread.message_count > 1 && (

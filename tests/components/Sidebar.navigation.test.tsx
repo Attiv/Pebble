@@ -69,8 +69,21 @@ vi.mock("../../src/hooks/queries", () => ({
   }),
 }));
 
+// Sidebar reads account unread counts through this module directly (not the
+// `hooks/queries` barrel), so it needs its own mock.
+vi.mock("../../src/hooks/queries/useAccountUnreadCounts", () => ({
+  useAccountUnreadCounts: () => ({}),
+  unreadCountForAccount: () => 0,
+}));
+
 vi.mock("../../src/hooks/queries/useFolderUnreadCounts", () => ({
   useFolderUnreadCountsForAccounts: () => ({ data: {} }),
+}));
+
+// This suite covers sidebar navigation only; the mark-all-read button and its
+// data dependencies are covered by Sidebar.markAllRead.test.tsx.
+vi.mock("../../src/components/MarkAllReadButton", () => ({
+  default: () => null,
 }));
 
 describe("Sidebar navigation", () => {

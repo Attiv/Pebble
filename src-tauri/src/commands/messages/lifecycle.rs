@@ -1,3 +1,4 @@
+use crate::badge;
 use crate::commands::gmail_labels::gmail_move_label_delta;
 use crate::state::AppState;
 use pebble_core::traits::{FolderProvider, LabelProvider};
@@ -74,6 +75,17 @@ fn finalize_permanent_local_delete(
 /// Returns "archived" or "unarchived" so the frontend can show the correct toast.
 #[tauri::command]
 pub async fn archive_message(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    message_id: String,
+) -> std::result::Result<String, PebbleError> {
+    let result = archive_message_inner(state, message_id).await?;
+    // Leaving or entering the inbox changes how much unread mail is left.
+    badge::request_refresh(&app);
+    Ok(result)
+}
+
+async fn archive_message_inner(
     state: State<'_, AppState>,
     message_id: String,
 ) -> std::result::Result<String, PebbleError> {
@@ -499,6 +511,16 @@ pub async fn archive_message(
 
 #[tauri::command]
 pub async fn delete_message(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    message_id: String,
+) -> std::result::Result<(), PebbleError> {
+    delete_message_inner(state, message_id).await?;
+    badge::request_refresh(&app);
+    Ok(())
+}
+
+async fn delete_message_inner(
     state: State<'_, AppState>,
     message_id: String,
 ) -> std::result::Result<(), PebbleError> {
@@ -773,6 +795,16 @@ pub async fn delete_message(
 
 #[tauri::command]
 pub async fn restore_message(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    message_id: String,
+) -> std::result::Result<(), PebbleError> {
+    restore_message_inner(state, message_id).await?;
+    badge::request_refresh(&app);
+    Ok(())
+}
+
+async fn restore_message_inner(
     state: State<'_, AppState>,
     message_id: String,
 ) -> std::result::Result<(), PebbleError> {
@@ -963,6 +995,18 @@ pub async fn restore_message(
 
 #[tauri::command]
 pub async fn move_to_folder(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    message_id: String,
+    target_folder_id: String,
+) -> std::result::Result<(), PebbleError> {
+    move_to_folder_inner(state, message_id, target_folder_id).await?;
+    // Moving into or out of trash/spam changes which messages count as unread mail.
+    badge::request_refresh(&app);
+    Ok(())
+}
+
+async fn move_to_folder_inner(
     state: State<'_, AppState>,
     message_id: String,
     target_folder_id: String,
@@ -1126,6 +1170,16 @@ pub async fn move_to_folder(
 
 #[tauri::command]
 pub async fn empty_trash(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    account_id: String,
+) -> std::result::Result<u32, PebbleError> {
+    let deleted = empty_trash_inner(state, account_id).await?;
+    badge::request_refresh(&app);
+    Ok(deleted)
+}
+
+async fn empty_trash_inner(
     state: State<'_, AppState>,
     account_id: String,
 ) -> std::result::Result<u32, PebbleError> {

@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   archiveMessage: vi.fn(),
   patchMessagesCache: vi.fn(),
   findCachedMessage: vi.fn(),
+  invalidateUnreadViews: vi.fn(),
 }));
 
 vi.mock("@/stores/mail.store", () => ({
@@ -71,6 +72,7 @@ vi.mock("@/lib/api", () => ({
 vi.mock("@/hooks/queries", () => ({
   patchMessagesCache: mocks.patchMessagesCache,
   findCachedMessage: mocks.findCachedMessage,
+  invalidateUnreadViews: mocks.invalidateUnreadViews,
 }));
 
 import { buildCommands } from "@/features/command-palette/commands";
@@ -101,23 +103,21 @@ describe("command palette mail commands", () => {
     await command("mail:mark-read").execute();
 
     expect(mocks.updateMessageFlags).toHaveBeenCalledWith("message-1", true);
-    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["threads"] });
-    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
+    expect(mocks.invalidateUnreadViews).toHaveBeenCalledWith(mocks.queryClient);
   });
 
   it("refreshes unread-derived queries after mark unread", async () => {
     await command("mail:mark-unread").execute();
 
     expect(mocks.updateMessageFlags).toHaveBeenCalledWith("message-1", false);
-    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["threads"] });
-    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
+    expect(mocks.invalidateUnreadViews).toHaveBeenCalledWith(mocks.queryClient);
   });
 
   it("refreshes folder unread counts after archive", async () => {
     await command("mail:archive").execute();
 
     expect(mocks.archiveMessage).toHaveBeenCalledWith("message-1");
-    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
+    expect(mocks.invalidateUnreadViews).toHaveBeenCalledWith(mocks.queryClient);
   });
 
   it("does not refresh folder unread counts for star-only changes", async () => {

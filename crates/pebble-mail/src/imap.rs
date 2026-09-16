@@ -441,6 +441,49 @@ where
     }
 }
 
+/// Maximum number of uids per `UID STORE` in [`ImapProvider::set_flags_bulk`].
+///
+/// A sequence set of 500 uids stays well inside the command-line limit servers
+/// enforce, while still collapsing a mailbox-wide flag change into a handful of
+/// round trips.
+pub const IMAP_STORE_UID_BATCH: usize = 500;
+
+/// Render uids as an IMAP sequence set, e.g. `1:3,7,9:10`.
+///
+/// Input order and duplicates do not matter: the result is sorted, deduplicated
+/// and compressed into ranges. Returns `None` for an empty list, which callers
+/// treat as "nothing to do".
+pub(crate) fn imap_sequence_set(uids: &[u32]) -> Option<String> {
+    let mut sorted = uids.to_vec();
+    sorted.sort_unstable();
+    sorted.dedup();
+    let first = *sorted.first()?;
+
+    let render = |start: u32, end: u32| -> String {
+        if start == end {
+            start.to_string()
+        } else {
+            format!("{start}:{end}")
+        }
+    };
+
+    let mut parts: Vec<String> = Vec::new();
+    let mut range_start = first;
+    let mut range_end = first;
+    for uid in sorted.into_iter().skip(1) {
+        if uid == range_end + 1 {
+            range_end = uid;
+            continue;
+        }
+        parts.push(render(range_start, range_end));
+        range_start = uid;
+        range_end = uid;
+    }
+    parts.push(render(range_start, range_end));
+
+    Some(parts.join(","))
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ImapMailboxStatus {
     pub uid_validity: Option<u32>,
@@ -1642,6 +1685,45 @@ impl ImapProvider {
         Ok(())
     }
 
+    /// Set the read flag of many messages in one mailbox with a single
+    /// `UID STORE`.
+    ///
+    /// [`Self::set_flags`] costs one `SELECT` plus one `STORE` per message, so
+    /// clearing a mailbox of thousands of unread messages would take thousands
+    /// of round trips. Callers chunk with [`IMAP_STORE_UID_BATCH`]. An empty
+    /// `uids` slice is a no-op.
+    pub async fn set_flags_bulk(&self, mailbox: &str, uids: &[u32], is_read: bool) -> Result<()> {
+        let Some(sequence_set) = imap_sequence_set(uids) else {
+            return Ok(());
+        };
+        let flag_cmd = if is_read {
+            "+FLAGS (\\Seen)"
+        } else {
+            "-FLAGS (\\Seen)"
+        };
+
+        let mut guard = self.session.lock().await;
+        let sess = guard
+            .as_mut()
+            .ok_or_else(|| PebbleError::Network("Not connected".to_string()))?;
+
+        with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, sess.select(mailbox)).await?;
+        let store_result = with_imap_timeout(
+            "STORE \\Seen (bulk)",
+            IMAP_COMMAND_TIMEOUT_SECS,
+            sess.uid_store(&sequence_set, &flag_cmd),
+        )
+        .await?;
+        let _: Vec<async_imap::types::Fetch> = with_imap_timeout(
+            "STORE \\Seen (bulk) collect",
+            IMAP_COMMAND_TIMEOUT_SECS,
+            store_result.try_collect(),
+        )
+        .await?;
+
+        Ok(())
+    }
+
     /// Move a message by UID from one mailbox to another.
     ///
     /// Tries IMAP MOVE (uid_mv) first, falls back to UID COPY + UID STORE \Deleted + EXPUNGE.
@@ -2317,5 +2399,38 @@ mod incremental_uid_tests {
     fn incremental_fetch_searches_when_uidnext_is_missing_or_newer() {
         assert!(should_search_incremental_uids(3292, None));
         assert!(should_search_incremental_uids(3292, Some(3293)));
+    }
+}
+
+#[cfg(test)]
+mod sequence_set_tests {
+    use super::imap_sequence_set;
+
+    #[test]
+    fn sequence_set_is_empty_without_uids() {
+        assert_eq!(imap_sequence_set(&[]), None);
+    }
+
+    #[test]
+    fn sequence_set_sorts_and_compresses_into_ranges() {
+        assert_eq!(imap_sequence_set(&[7]).as_deref(), Some("7"));
+        assert_eq!(imap_sequence_set(&[3, 1, 2]).as_deref(), Some("1:3"));
+        assert_eq!(
+            imap_sequence_set(&[1, 2, 3, 7, 9, 10]).as_deref(),
+            Some("1:3,7,9:10")
+        );
+    }
+
+    #[test]
+    fn sequence_set_deduplicates_repeated_uids() {
+        assert_eq!(imap_sequence_set(&[5, 5, 6, 5]).as_deref(), Some("5:6"));
+    }
+
+    #[test]
+    fn sequence_set_keeps_singletons_between_ranges() {
+        assert_eq!(
+            imap_sequence_set(&[100, 101, 103, 200, 201, 202]).as_deref(),
+            Some("100:101,103,200:202")
+        );
     }
 }

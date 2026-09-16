@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   queryClient: {
     invalidateQueries: vi.fn(),
   },
+  invalidateUnreadViews: vi.fn(),
   getMessageLabelsBatch: vi.fn(),
   batchArchive: vi.fn(),
   batchDelete: vi.fn(),
@@ -51,6 +52,7 @@ vi.mock("../../src/hooks/queries", () => ({
     data: mocks.accounts,
   }),
   useFoldersForAccountsQuery: () => ({ data: mocks.folders }),
+  invalidateUnreadViews: mocks.invalidateUnreadViews,
 }));
 
 vi.mock("../../src/lib/api", () => ({
@@ -72,17 +74,17 @@ vi.mock("../../src/stores/confirm.store", () => ({
 }));
 
 vi.mock("../../src/components/MessageItem", () => ({
-  default: ({ message, folderRole, accountColor, accountLabel }: {
+  default: ({ message, folderRole, accountBadge }: {
     message: MessageSummary;
     folderRole?: string | null;
-    accountColor?: string;
-    accountLabel?: string;
+    accountBadge?: { color: string; label: string; title: string };
   }) => (
     <div
       data-testid={`message-${message.id}`}
       data-folder-role={folderRole ?? ""}
-      data-account-color={accountColor ?? ""}
-      data-account-label={accountLabel ?? ""}
+      data-account-color={accountBadge?.color ?? ""}
+      data-account-label={accountBadge?.label ?? ""}
+      data-account-title={accountBadge?.title ?? ""}
     >
       {message.subject}
     </div>
@@ -224,7 +226,7 @@ describe("MessageList", () => {
     expect(listbox.className).toContain("message-list-scroll");
   });
 
-  it("passes account color metadata to message items", () => {
+  it("passes account badge metadata to message items", () => {
     const message = { ...makeMessage("m-1"), account_id: "account-2" };
     useMailStore.setState({ activeAccountId: null });
 
@@ -240,7 +242,31 @@ describe("MessageList", () => {
     const row = screen.getByTestId("message-m-1");
 
     expect(row.getAttribute("data-account-color")).toBe("#3b82f6");
-    expect(row.getAttribute("data-account-label")).toBe("Two <two@example.com>");
+    // The row shows the short handle; the full identity stays in the tooltip.
+    expect(row.getAttribute("data-account-label")).toBe("two");
+    expect(row.getAttribute("data-account-title")).toBe("two@example.com");
+  });
+
+  it("prefers the mailbox label the user set over the address", () => {
+    mocks.accounts = mocks.accounts.map((account) =>
+      account.id === "account-2" ? { ...account, account_label: "客户邮件" } : account,
+    );
+    const message = { ...makeMessage("m-1"), account_id: "account-2" };
+    useMailStore.setState({ activeAccountId: null });
+
+    render(
+      <MessageList
+        messages={[message]}
+        selectedMessageId={null}
+        onSelectMessage={vi.fn()}
+        loading={false}
+      />,
+    );
+
+    const row = screen.getByTestId("message-m-1");
+
+    expect(row.getAttribute("data-account-label")).toBe("客户邮件");
+    expect(row.getAttribute("data-account-title")).toBe("客户邮件 · two@example.com");
   });
 
   it("does not pass account color metadata when a single account is selected", () => {
@@ -284,7 +310,9 @@ describe("MessageList", () => {
     expect(row.getAttribute("data-account-color")).toBe("");
   });
 
-  it("derives a stable account color when the account has no saved color", () => {
+  it("omits the badge for a message pointing at a mailbox that is no longer configured", () => {
+    // Messages cascade-delete with their account, so this only happens while
+    // the account list is still arriving. Labelling the row would be guesswork.
     const message = { ...makeMessage("m-1"), account_id: "missing-account" };
     useMailStore.setState({ activeAccountId: null });
 
@@ -297,9 +325,10 @@ describe("MessageList", () => {
       />,
     );
 
-    const color = screen.getByTestId("message-m-1").getAttribute("data-account-color");
+    const row = screen.getByTestId("message-m-1");
 
-    expect(color).toMatch(/^#[0-9a-f]{6}$/);
+    expect(row.getAttribute("data-account-color")).toBe("");
+    expect(row.getAttribute("data-account-label")).toBe("");
   });
 
   it("uses different default colors for known accounts without saved colors", () => {
@@ -369,7 +398,7 @@ describe("MessageList", () => {
     fireEvent.click(screen.getByRole("button", { name: "messageActions.archive" }));
 
     await waitFor(() => expect(mocks.batchArchive).toHaveBeenCalledWith(["m-1", "m-2"]));
-    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
+    expect(mocks.invalidateUnreadViews).toHaveBeenCalledWith(mocks.queryClient);
   });
 
   it("refreshes folder unread counts after a successful batch read-state action", async () => {
@@ -391,7 +420,7 @@ describe("MessageList", () => {
     fireEvent.click(screen.getByRole("button", { name: "batch.markRead" }));
 
     await waitFor(() => expect(mocks.batchMarkRead).toHaveBeenCalledWith(["m-1", "m-2"], true));
-    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
+    expect(mocks.invalidateUnreadViews).toHaveBeenCalledWith(mocks.queryClient);
   });
 
   it("uses the custom checkbox control for select all", () => {
