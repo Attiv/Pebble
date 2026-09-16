@@ -116,8 +116,12 @@ pub async fn move_to_kanban(
 pub async fn list_kanban_cards(
     state: State<'_, AppState>,
     column: Option<KanbanColumn>,
+    account_id: Option<String>,
 ) -> std::result::Result<Vec<KanbanCard>, PebbleError> {
-    state.store.list_kanban_cards(column.as_ref())
+    // `None` account id means the combined "all accounts" board.
+    state
+        .store
+        .list_kanban_cards(column.as_ref(), account_id.as_deref())
 }
 
 #[tauri::command]

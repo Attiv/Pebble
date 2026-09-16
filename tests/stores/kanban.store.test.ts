@@ -43,10 +43,26 @@ describe("KanbanStore", () => {
 
     await useKanbanStore.getState().fetchCards();
 
-    expect(mockedInvoke).toHaveBeenCalledWith("list_kanban_cards", { column: undefined });
+    // No account id means the combined board, which is what Layout requests at
+    // startup so the "in kanban" indicators cover every account.
+    expect(mockedInvoke).toHaveBeenCalledWith("list_kanban_cards", {
+      column: undefined,
+      accountId: null,
+    });
     expect(mockedInvoke).toHaveBeenCalledWith("list_kanban_context_notes");
     expect(useKanbanStore.getState().cards).toHaveLength(2);
     expect(useKanbanStore.getState().loading).toBe(false);
+  });
+
+  it("scopes the board to the selected account", async () => {
+    mockedInvoke.mockImplementation(() => Promise.resolve([]));
+
+    await useKanbanStore.getState().fetchCards("account-2");
+
+    expect(mockedInvoke).toHaveBeenCalledWith("list_kanban_cards", {
+      column: undefined,
+      accountId: "account-2",
+    });
   });
 
   it("does not let an older fetch overwrite a newer fetch", async () => {

@@ -412,8 +412,15 @@ export async function isTrustedSender(accountId: string, email: string): Promise
 export async function searchMessages(
   query: string,
   limit?: number,
+  accountId?: string,
 ): Promise<SearchHit[]> {
-  return invoke<SearchHit[]>("search_messages", { query, limit });
+  // `accountId` narrows the hit list to one mailbox. Omitting it is the
+  // explicit "all accounts" view, which is the only case that may span accounts.
+  return invoke<SearchHit[]>("search_messages", {
+    query,
+    limit,
+    accountId: accountId ?? null,
+  });
 }
 
 export async function advancedSearch(
@@ -483,8 +490,15 @@ export async function moveToKanban(messageId: string, column: KanbanColumnType, 
   return invoke<void>("move_to_kanban", { messageId, column, position });
 }
 
-export async function listKanbanCards(column?: KanbanColumnType): Promise<KanbanCard[]> {
-  return invoke<KanbanCard[]>("list_kanban_cards", { column });
+export async function listKanbanCards(
+  column?: KanbanColumnType,
+  accountId?: string,
+): Promise<KanbanCard[]> {
+  // `accountId` keeps the board inside one mailbox; omit it for the combined board.
+  return invoke<KanbanCard[]>("list_kanban_cards", {
+    column,
+    accountId: accountId ?? null,
+  });
 }
 
 export async function removeFromKanban(messageId: string): Promise<void> {
@@ -518,8 +532,9 @@ export async function unsnoozeMessage(messageId: string): Promise<void> {
   return invoke<void>("unsnooze_message", { messageId });
 }
 
-export async function listSnoozed(): Promise<SnoozedMessage[]> {
-  return invoke<SnoozedMessage[]>("list_snoozed");
+export async function listSnoozed(accountId?: string): Promise<SnoozedMessage[]> {
+  // `accountId` scopes the list to one mailbox; omit it for all accounts.
+  return invoke<SnoozedMessage[]>("list_snoozed", { accountId: accountId ?? null });
 }
 
 // ─── Rules API ───────────────────────────────────────────────────────────────

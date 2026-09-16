@@ -6,6 +6,7 @@ import { Search, SlidersHorizontal, Loader } from "lucide-react";
 import type { AdvancedSearchQuery, SearchHit } from "@/lib/api";
 import { advancedSearch, searchMessages } from "@/lib/api";
 import { useUIStore } from "@/stores/ui.store";
+import { useMailStore } from "@/stores/mail.store";
 import SearchFilters from "./SearchFilters";
 import SearchResultItem from "./SearchResultItem";
 import MessageDetail from "@/components/MessageDetail";
@@ -32,18 +33,26 @@ export default function SearchView() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const storeSearchQuery = useUIStore((s) => s.searchQuery);
+  const activeAccountId = useMailStore((s) => s.activeAccountId);
 
   const trimmed = query.trim();
   const filtersActive = hasActiveFilters(filters);
   const searchEnabled = hasSearched && (trimmed.length > 0 || filtersActive);
 
   const { data: results = [], isLoading: loading, error: queryError, refetch } = useQuery({
-    queryKey: ["search", trimmed, filters],
+    // `activeAccountId` belongs in the key: switching accounts in the sidebar
+    // must re-run the search against the newly selected mailbox instead of
+    // serving cached hits from the previous one.
+    queryKey: ["search", trimmed, filters, activeAccountId],
     queryFn: () => {
       if (filtersActive) {
-        return advancedSearch({ ...filters, text: trimmed || undefined });
+        return advancedSearch({
+          ...filters,
+          text: trimmed || undefined,
+          accountId: activeAccountId ?? undefined,
+        });
       }
-      return searchMessages(trimmed);
+      return searchMessages(trimmed, undefined, activeAccountId ?? undefined);
     },
     enabled: searchEnabled,
     staleTime: 60_000,

@@ -29,17 +29,38 @@ impl Store {
         })
     }
 
-    pub fn list_snoozed_messages(&self) -> Result<Vec<SnoozedMessage>> {
+    /// List snoozed messages, optionally narrowed to a single account.
+    ///
+    /// `snoozed_messages` only stores `message_id`, so the account filter has to
+    /// go through `messages`. Passing `None` is the explicit "all accounts" view.
+    pub fn list_snoozed_messages(&self, account_id: Option<&str>) -> Result<Vec<SnoozedMessage>> {
         self.with_read(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT message_id, snoozed_at, unsnoozed_at, return_to
-                     FROM snoozed_messages",
-            )?;
-            let rows = stmt.query_map([], row_to_snoozed)?;
             let mut results = Vec::new();
-            for row in rows {
-                results.push(row?);
+
+            match account_id.filter(|id| !id.is_empty()) {
+                Some(account) => {
+                    let mut stmt = conn.prepare(
+                        "SELECT message_id, snoozed_at, unsnoozed_at, return_to
+                             FROM snoozed_messages
+                             WHERE message_id IN (SELECT id FROM messages WHERE account_id = ?1)",
+                    )?;
+                    let rows = stmt.query_map(params![account], row_to_snoozed)?;
+                    for row in rows {
+                        results.push(row?);
+                    }
+                }
+                None => {
+                    let mut stmt = conn.prepare(
+                        "SELECT message_id, snoozed_at, unsnoozed_at, return_to
+                             FROM snoozed_messages",
+                    )?;
+                    let rows = stmt.query_map([], row_to_snoozed)?;
+                    for row in rows {
+                        results.push(row?);
+                    }
+                }
             }
+
             Ok(results)
         })
     }
@@ -164,7 +185,7 @@ mod tests {
         };
         store.snooze_message(&snooze).unwrap();
 
-        let all = store.list_snoozed_messages().unwrap();
+        let all = store.list_snoozed_messages(None).unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].message_id, msg_id);
         assert_eq!(all[0].return_to, "inbox");
@@ -208,7 +229,7 @@ mod tests {
         store.snooze_message(&snooze).unwrap();
         store.unsnooze_message(&msg_id).unwrap();
 
-        let all = store.list_snoozed_messages().unwrap();
+        let all = store.list_snoozed_messages(None).unwrap();
         assert_eq!(all.len(), 0);
     }
 
@@ -232,5 +253,94 @@ mod tests {
         assert_eq!(got.message_id, msg_id);
         assert_eq!(got.return_to, "archive");
         assert_eq!(got.unsnoozed_at, now + 3600);
+    }
+
+    /// Insert a second account with one message (no folder needed — the account
+    /// filter only consults `messages.account_id`). Returns the new ids.
+    fn insert_other_account_message(store: &Store) -> (String, String) {
+        let now = pebble_core::now_timestamp();
+        let account = pebble_core::Account {
+            account_label: None,
+            provider_display_name: None,
+            id: pebble_core::new_id(),
+            email: "other@example.com".to_string(),
+            display_name: "Other".to_string(),
+            color: None,
+            provider: pebble_core::ProviderType::Imap,
+            created_at: now,
+            updated_at: now,
+        };
+        store.insert_account(&account).unwrap();
+
+        let msg_id = pebble_core::new_id();
+        let msg = pebble_core::Message {
+            id: msg_id.clone(),
+            account_id: account.id.clone(),
+            remote_id: "1".to_string(),
+            message_id_header: None,
+            in_reply_to: None,
+            references_header: None,
+            thread_id: None,
+            subject: "Test".to_string(),
+            snippet: "Test snippet".to_string(),
+            from_address: "sender@example.com".to_string(),
+            from_name: "Sender".to_string(),
+            to_list: vec![],
+            cc_list: vec![],
+            bcc_list: vec![],
+            body_text: "body".to_string(),
+            body_html_raw: "<p>body</p>".to_string(),
+            has_attachments: false,
+            is_read: false,
+            is_starred: false,
+            is_draft: false,
+            date: now,
+            remote_version: None,
+            is_deleted: false,
+            deleted_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.insert_message(&msg, &[]).unwrap();
+
+        (account.id, msg_id)
+    }
+
+    #[test]
+    fn list_snoozed_messages_filters_by_account() {
+        let (store, first_msg_id) = setup_store_with_message();
+        let first_account_id = store.list_accounts().unwrap()[0].id.clone();
+        let (other_account_id, other_msg_id) = insert_other_account_message(&store);
+
+        let now = pebble_core::now_timestamp();
+        for message_id in [&first_msg_id, &other_msg_id] {
+            store
+                .snooze_message(&SnoozedMessage {
+                    message_id: message_id.clone(),
+                    snoozed_at: now,
+                    unsnoozed_at: now + 3600,
+                    return_to: "inbox".to_string(),
+                })
+                .unwrap();
+        }
+
+        // `None` is the explicit "all accounts" view and must show both.
+        assert_eq!(store.list_snoozed_messages(None).unwrap().len(), 2);
+
+        let mine = store
+            .list_snoozed_messages(Some(&first_account_id))
+            .unwrap();
+        assert_eq!(
+            mine.len(),
+            1,
+            "another account's snooze leaked into the list"
+        );
+        assert_eq!(mine[0].message_id, first_msg_id);
+
+        let theirs = store
+            .list_snoozed_messages(Some(&other_account_id))
+            .unwrap();
+        assert_eq!(theirs.len(), 1);
+        assert_eq!(theirs[0].message_id, other_msg_id);
     }
 }

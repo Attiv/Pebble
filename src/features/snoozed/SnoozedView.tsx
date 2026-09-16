@@ -5,6 +5,7 @@ import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import type { SnoozedMessage, Message } from "@/lib/api";
 import { listSnoozed, unsnoozeMessage, getMessagesBatch } from "@/lib/api";
 import { useUIStore } from "@/stores/ui.store";
+import { useMailStore } from "@/stores/mail.store";
 import { useToastStore } from "@/stores/toast.store";
 
 interface SnoozedEntry {
@@ -18,16 +19,19 @@ export default function SnoozedView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const openMessageInInbox = useUIStore((s) => s.openMessageInInbox);
+  const activeAccountId = useMailStore((s) => s.activeAccountId);
 
+  // Reload whenever the sidebar account selection changes so the list only ever
+  // shows snoozes belonging to the selected mailbox.
   useEffect(() => {
     loadSnoozed();
-  }, []);
+  }, [activeAccountId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadSnoozed() {
     setLoading(true);
     setError(null);
     try {
-      const snoozed = await listSnoozed();
+      const snoozed = await listSnoozed(activeAccountId ?? undefined);
       const ids = snoozed.map((s) => s.message_id);
       const messages = ids.length > 0 ? await getMessagesBatch(ids) : [];
       const messageMap = new Map(messages.map((m) => [m.id, m]));

@@ -2254,7 +2254,7 @@ mod remote_id_scope_tests {
         assert!(reconciled_stable.is_starred);
         assert_eq!(store.get_message_labels(&stable.id).unwrap().len(), 1);
         assert!(store
-            .list_kanban_cards(None)
+            .list_kanban_cards(None, None)
             .unwrap()
             .iter()
             .any(|card| card.message_id == stable.id));
@@ -2544,7 +2544,7 @@ mod remote_id_scope_tests {
             vec![archive.id]
         );
         assert_eq!(store.get_message_labels(&updated.id).unwrap().len(), 1);
-        assert_eq!(store.list_kanban_cards(None).unwrap().len(), 1);
+        assert_eq!(store.list_kanban_cards(None, None).unwrap().len(), 1);
         assert!(store.get_snoozed_message(&updated.id).unwrap().is_some());
     }
 
@@ -2645,7 +2645,7 @@ mod remote_id_scope_tests {
         assert_eq!(attachments.len(), 1);
         assert_eq!(attachments[0].id, old_attachment.id);
         assert_eq!(store.get_message_labels(&original.id).unwrap().len(), 1);
-        assert_eq!(store.list_kanban_cards(None).unwrap().len(), 1);
+        assert_eq!(store.list_kanban_cards(None, None).unwrap().len(), 1);
         assert!(store.get_snoozed_message(&original.id).unwrap().is_some());
     }
 

@@ -277,6 +277,8 @@ export interface AdvancedSearchQuery {
   dateTo?: number;
   hasAttachment?: boolean;
   folderId?: string;
+  /** Scope the search to a single mailbox; omit for the combined view. */
+  accountId?: string;
 }
 
 // ─── Translate types ────────────────────────────────────────────────────────────

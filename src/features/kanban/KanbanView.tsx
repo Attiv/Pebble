@@ -20,6 +20,7 @@ const COLUMN_IDS: { id: KanbanColumnType; titleKey: string }[] = [
 export default function KanbanView() {
   const { t } = useTranslation();
   const { cards, contextNotes, loading, fetchCards, moveCard, removeCard } = useKanbanStore();
+  const activeAccountId = useMailStore((s) => s.activeAccountId);
   const [messages, setMessages] = useState<Map<string, Message>>(new Map());
 
   const sensors = useSensors(
@@ -28,8 +29,8 @@ export default function KanbanView() {
   );
 
   useEffect(() => {
-    fetchCards();
-  }, [fetchCards]);
+    fetchCards(activeAccountId ?? undefined);
+  }, [fetchCards, activeAccountId]);
 
   // Load message details for all cards (batch)
   useEffect(() => {
@@ -103,7 +104,9 @@ export default function KanbanView() {
       action: {
         label: t("kanban.undoRemove", "Undo"),
         onClick: () => {
-          moveToKanban(messageId, oldColumn).then(() => fetchCards());
+          moveToKanban(messageId, oldColumn).then(() =>
+            fetchCards(activeAccountId ?? undefined),
+          );
         },
       },
     });

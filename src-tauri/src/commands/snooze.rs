@@ -44,6 +44,8 @@ pub async fn unsnooze_message(
 #[tauri::command]
 pub async fn list_snoozed(
     state: State<'_, AppState>,
+    account_id: Option<String>,
 ) -> std::result::Result<Vec<SnoozedMessage>, PebbleError> {
-    state.store.list_snoozed_messages()
+    // `None` means the combined "all accounts" view.
+    state.store.list_snoozed_messages(account_id.as_deref())
 }

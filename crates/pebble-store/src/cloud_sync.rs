@@ -339,7 +339,7 @@ impl Store {
             .collect();
 
         let rules = self.list_rules()?;
-        let kanban_cards = self.list_kanban_cards(None)?;
+        let kanban_cards = self.list_kanban_cards(None, None)?;
         let contacts = self.with_read(|conn| {
             let tx = conn.unchecked_transaction()?;
             let contacts = list_all_contacts_for_backup_with_conn(&tx)?;
@@ -1356,7 +1356,7 @@ mod tests {
             .import_settings(&serde_json::to_vec(&backup).unwrap())
             .unwrap();
 
-        let cards = store.list_kanban_cards(None).unwrap();
+        let cards = store.list_kanban_cards(None, None).unwrap();
         assert_eq!(cards.len(), 1);
         assert_eq!(cards[0].message_id, new_msg.id);
         assert_eq!(cards[0].column, KanbanColumn::Done);

@@ -947,7 +947,7 @@ mod rule_writeback_tests {
             1
         );
         assert!(store.list_search_pending().unwrap().is_empty());
-        assert_eq!(search.search("Test", 10).unwrap().len(), 1);
+        assert_eq!(search.search("Test", 10, None).unwrap().len(), 1);
     }
 
     #[test]

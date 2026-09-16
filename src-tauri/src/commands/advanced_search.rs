@@ -16,6 +16,7 @@ pub struct AdvancedSearchQuery {
     pub date_to: Option<i64>,
     pub has_attachment: Option<bool>,
     pub folder_id: Option<String>,
+    pub account_id: Option<String>,
 }
 
 #[tauri::command]
@@ -36,6 +37,7 @@ pub async fn advanced_search(
             date_to: query.date_to,
             has_attachment: query.has_attachment,
             folder_id: query.folder_id.as_deref(),
+            account_id: query.account_id.as_deref(),
             limit,
         })
     })

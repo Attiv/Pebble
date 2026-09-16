@@ -71,6 +71,19 @@ fn make_snippet(doc: &TantivyDocument, field: tantivy::schema::Field) -> String 
     }
 }
 
+/// Exact-match filter on the indexed `account_id` field.
+///
+/// Search is the one place where a mail client can leak another account's
+/// messages: the index holds every mailbox, so without this the hit list mixes
+/// accounts. `None` keeps the opt-in "all accounts" behaviour.
+fn account_filter(ss: &SearchSchema, account_id: Option<&str>) -> Option<Box<dyn Query>> {
+    let account_id = account_id.filter(|id| !id.is_empty())?;
+    Some(Box::new(TermQuery::new(
+        Term::from_field_text(ss.account_id, account_id),
+        tantivy::schema::IndexRecordOption::Basic,
+    )))
+}
+
 pub struct AdvancedSearchParams<'a> {
     pub text: Option<&'a str>,
     pub from: Option<&'a str>,
@@ -80,6 +93,7 @@ pub struct AdvancedSearchParams<'a> {
     pub date_to: Option<i64>,
     pub has_attachment: Option<bool>,
     pub folder_id: Option<&'a str>,
+    pub account_id: Option<&'a str>,
     pub limit: usize,
 }
 
@@ -321,7 +335,17 @@ impl TantivySearch {
         Ok(())
     }
 
-    pub fn search(&self, query_text: &str, limit: usize) -> Result<Vec<SearchHit>> {
+    /// Full-text search over subject/body/sender.
+    ///
+    /// `account_id` scopes the hits to one mailbox; pass `None` only for the
+    /// explicit "all accounts" view, otherwise results from different accounts
+    /// are indistinguishable to the caller.
+    pub fn search(
+        &self,
+        query_text: &str,
+        limit: usize,
+        account_id: Option<&str>,
+    ) -> Result<Vec<SearchHit>> {
         let ss = &self.schema;
 
         let searcher = self.reader.searcher();
@@ -331,9 +355,17 @@ impl TantivySearch {
             vec![ss.subject, ss.body_text, ss.from_address, ss.from_name],
         );
 
-        let query = query_parser
+        let parsed = query_parser
             .parse_query(query_text)
             .map_err(|e| PebbleError::Internal(format!("Failed to parse query: {e}")))?;
+
+        let query: Box<dyn Query> = match account_filter(ss, account_id) {
+            Some(filter) => Box::new(BooleanQuery::new(vec![
+                (Occur::Must, parsed),
+                (Occur::Must, filter),
+            ])),
+            None => parsed,
+        };
 
         let top_docs = searcher
             .search(&query, &TopDocs::with_limit(limit))
@@ -389,6 +421,7 @@ impl TantivySearch {
             date_to,
             has_attachment,
             folder_id,
+            account_id,
             limit,
         } = params;
         let ss = &self.schema;
@@ -469,6 +502,11 @@ impl TantivySearch {
                 let term_query = TermQuery::new(term, tantivy::schema::IndexRecordOption::Basic);
                 sub_queries.push((Occur::Must, Box::new(term_query)));
             }
+        }
+
+        // Account filter — keeps advanced search inside the selected mailbox.
+        if let Some(filter) = account_filter(ss, account_id) {
+            sub_queries.push((Occur::Must, filter));
         }
 
         // If no sub-queries, return empty
@@ -618,7 +656,7 @@ mod tests {
         engine.index_message(&msg, &["inbox".to_string()]).unwrap();
         engine.commit().unwrap();
 
-        let hits = engine.search("Invoice", 10).unwrap();
+        let hits = engine.search("Invoice", 10, None).unwrap();
         assert!(!hits.is_empty(), "expected at least one hit");
         assert_eq!(hits[0].message_id, "msg-1");
     }
@@ -635,7 +673,7 @@ mod tests {
         engine.index_message(&msg, &["inbox".to_string()]).unwrap();
         engine.commit().unwrap();
 
-        let general_hits = engine.search("invoice", 10).unwrap();
+        let general_hits = engine.search("invoice", 10, None).unwrap();
         assert_eq!(general_hits.len(), 1);
         assert_eq!(general_hits[0].message_id, "msg-case-subject");
 
@@ -649,6 +687,7 @@ mod tests {
                 date_to: None,
                 has_attachment: None,
                 folder_id: None,
+                account_id: None,
                 limit: 10,
             })
             .unwrap();
@@ -729,7 +768,7 @@ mod tests {
         engine.index_message(&msg, &["inbox".to_string()]).unwrap();
         engine.commit().unwrap();
 
-        let hits = engine.search("quarterly budget", 10).unwrap();
+        let hits = engine.search("quarterly budget", 10, None).unwrap();
         assert!(!hits.is_empty(), "expected body search to find the message");
         assert_eq!(hits[0].message_id, "msg-2");
     }
@@ -746,7 +785,7 @@ mod tests {
         engine.index_message(&msg, &["inbox".to_string()]).unwrap();
         engine.commit().unwrap();
 
-        let hits = engine.search("wonderland", 10).unwrap();
+        let hits = engine.search("wonderland", 10, None).unwrap();
         assert!(
             !hits.is_empty(),
             "expected from_address search to find the message"
@@ -766,7 +805,9 @@ mod tests {
         engine.index_message(&msg, &["inbox".to_string()]).unwrap();
         engine.commit().unwrap();
 
-        let hits = engine.search("xyzzy_nonexistent_term_42", 10).unwrap();
+        let hits = engine
+            .search("xyzzy_nonexistent_term_42", 10, None)
+            .unwrap();
         assert!(hits.is_empty(), "expected no results for nonexistent term");
     }
 
@@ -783,12 +824,12 @@ mod tests {
         engine.commit().unwrap();
 
         // Verify indexed
-        let hits_before = engine.search("Clearable", 10).unwrap();
+        let hits_before = engine.search("Clearable", 10, None).unwrap();
         assert!(!hits_before.is_empty(), "expected message before clear");
 
         engine.clear_index().unwrap();
 
-        let hits_after = engine.search("Clearable", 10).unwrap();
+        let hits_after = engine.search("Clearable", 10, None).unwrap();
         assert!(hits_after.is_empty(), "expected no results after clear");
     }
 
@@ -807,10 +848,10 @@ mod tests {
             .unwrap();
         engine.commit().unwrap();
 
-        let old_hits = engine.search("Old", 10).unwrap();
+        let old_hits = engine.search("Old", 10, None).unwrap();
         assert!(old_hits.is_empty(), "expected old document to be replaced");
 
-        let new_hits = engine.search("New", 10).unwrap();
+        let new_hits = engine.search("New", 10, None).unwrap();
         assert_eq!(new_hits.len(), 1, "expected one replacement document");
 
         let inbox_hits = engine
@@ -823,6 +864,7 @@ mod tests {
                 date_to: None,
                 has_attachment: None,
                 folder_id: Some("inbox"),
+                account_id: None,
                 limit: 10,
             })
             .unwrap();
@@ -844,14 +886,14 @@ mod tests {
         engine.index_message(&msg, &["inbox".to_string()]).unwrap();
         engine.commit().unwrap();
 
-        let hits = engine.search("前端界面", 10).unwrap();
+        let hits = engine.search("前端界面", 10, None).unwrap();
         assert!(
             !hits.is_empty(),
             "expected CJK body search to find the message"
         );
         assert_eq!(hits[0].message_id, "msg-cjk-1");
 
-        let hits2 = engine.search("项目进度", 10).unwrap();
+        let hits2 = engine.search("项目进度", 10, None).unwrap();
         assert!(
             !hits2.is_empty(),
             "expected CJK subject search to find the message"
@@ -870,7 +912,7 @@ mod tests {
         engine.index_message(&msg, &["inbox".to_string()]).unwrap();
         engine.commit().unwrap();
 
-        let hits = engine.search("quarterly", 10).unwrap();
+        let hits = engine.search("quarterly", 10, None).unwrap();
         assert!(!hits.is_empty());
         assert!(
             hits[0].snippet.contains("quarterly"),
@@ -929,14 +971,14 @@ mod tests {
         );
 
         // account-1 messages should be gone — search for unique term "zephyr"
-        let hits_a = engine.search("zephyr", 10).unwrap();
+        let hits_a = engine.search("zephyr", 10, None).unwrap();
         assert!(
             hits_a.is_empty(),
             "expected account-1 messages to be removed from index"
         );
 
         // account-2 message should still be present — search for unique term "pinnacle"
-        let hits_c = engine.search("pinnacle", 10).unwrap();
+        let hits_c = engine.search("pinnacle", 10, None).unwrap();
         assert_eq!(
             hits_c.len(),
             1,
@@ -971,6 +1013,7 @@ mod tests {
                 date_to: None,
                 has_attachment: None,
                 folder_id: None,
+                account_id: None,
                 limit: 10,
             })
             .unwrap();
@@ -979,5 +1022,85 @@ mod tests {
             "expected CC recipient to be searchable via to filter"
         );
         assert_eq!(hits[0].message_id, "msg-cc");
+    }
+
+    /// Two identical messages in two mailboxes: the shared index holds both, so
+    /// only the account filter can keep a scoped search from leaking mail.
+    fn index_same_subject_in_two_accounts(engine: &TantivySearch) {
+        let mut personal = make_test_message(
+            "msg-personal",
+            "Quarterly report",
+            "Numbers for the quarter.",
+            "billing@acme.com",
+        );
+        personal.account_id = "account-personal".to_string();
+        let mut work = make_test_message(
+            "msg-work",
+            "Quarterly report",
+            "Numbers for the quarter.",
+            "billing@acme.com",
+        );
+        work.account_id = "account-work".to_string();
+
+        engine
+            .index_message(&personal, &["inbox".to_string()])
+            .unwrap();
+        engine.index_message(&work, &["inbox".to_string()]).unwrap();
+        engine.commit().unwrap();
+    }
+
+    #[test]
+    fn search_scopes_hits_to_the_requested_account() {
+        let engine = TantivySearch::open_in_memory().unwrap();
+        index_same_subject_in_two_accounts(&engine);
+
+        // `None` is the explicit "all accounts" view and must span mailboxes.
+        let all = engine.search("Quarterly", 10, None).unwrap();
+        assert_eq!(all.len(), 2, "unscoped search should span accounts");
+
+        let scoped = engine
+            .search("Quarterly", 10, Some("account-work"))
+            .unwrap();
+        assert_eq!(scoped.len(), 1, "scoped search leaked another account");
+        assert_eq!(scoped[0].message_id, "msg-work");
+    }
+
+    #[test]
+    fn advanced_search_scopes_hits_to_the_requested_account() {
+        let engine = TantivySearch::open_in_memory().unwrap();
+        index_same_subject_in_two_accounts(&engine);
+
+        let all = engine
+            .advanced_search(AdvancedSearchParams {
+                text: Some("Quarterly"),
+                from: None,
+                to: None,
+                subject: None,
+                date_from: None,
+                date_to: None,
+                has_attachment: None,
+                folder_id: None,
+                account_id: None,
+                limit: 10,
+            })
+            .unwrap();
+        assert_eq!(all.len(), 2);
+
+        let scoped = engine
+            .advanced_search(AdvancedSearchParams {
+                text: Some("Quarterly"),
+                from: None,
+                to: None,
+                subject: None,
+                date_from: None,
+                date_to: None,
+                has_attachment: None,
+                folder_id: None,
+                account_id: Some("account-personal"),
+                limit: 10,
+            })
+            .unwrap();
+        assert_eq!(scoped.len(), 1, "scoped search leaked another account");
+        assert_eq!(scoped[0].message_id, "msg-personal");
     }
 }

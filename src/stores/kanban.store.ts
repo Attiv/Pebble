@@ -14,7 +14,7 @@ interface KanbanState {
   cardIdSet: Set<string>;
   contextNotes: Record<string, string>;
   loading: boolean;
-  fetchCards: () => Promise<void>;
+  fetchCards: (accountId?: string) => Promise<void>;
   moveCard: (messageId: string, column: KanbanColumnType, position: number) => Promise<void>;
   addCard: (messageId: string, column: KanbanColumnType) => Promise<void>;
   removeCard: (messageId: string) => Promise<void>;
@@ -71,14 +71,20 @@ export const useKanbanStore = create<KanbanState>((set, get) => ({
   contextNotes: {},
   loading: false,
 
-  fetchCards: async () => {
+  // `accountId` scopes the board to the mailbox selected in the sidebar. The
+  // startup call made by Layout passes nothing, which keeps the card id set
+  // (used for the "in kanban" indicators) covering every account.
+  fetchCards: async (accountId?: string) => {
     const fetchGeneration = ++nextFetchGeneration;
     latestFetchGeneration = fetchGeneration;
     const contextNoteGenerationAtStart = nextContextNoteGeneration;
     const pendingContextNotesAtStart = new Set(latestContextNoteGeneration.keys());
     set({ loading: true });
     try {
-      const [cards, contextNotes] = await Promise.all([listKanbanCards(), loadContextNotes()]);
+      const [cards, contextNotes] = await Promise.all([
+        listKanbanCards(undefined, accountId),
+        loadContextNotes(),
+      ]);
       if (latestFetchGeneration !== fetchGeneration) return;
       set((state) => {
         const mergedContextNotes = { ...contextNotes };

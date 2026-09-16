@@ -966,7 +966,7 @@ mod tests {
         .unwrap();
         refresh_search_document_with_store(&store, &search, &saved.id).unwrap();
 
-        let hits = search.search("Queued", 10).unwrap();
+        let hits = search.search("Queued", 10, None).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].message_id, saved.id);
 
