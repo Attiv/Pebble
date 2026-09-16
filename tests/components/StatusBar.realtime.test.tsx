@@ -68,6 +68,7 @@ vi.mock("../../src/hooks/mutations/useSyncMutation", () => ({
 }));
 
 vi.mock("../../src/hooks/queries", () => ({
+  accountUnreadCountsQueryKey: ["account-unread-counts"],
   pendingMailOpsSummaryQueryKey: (accountId: string | null) => ["pendingMailOps", accountId],
   usePendingMailOpsSummary: () => ({
     data: mocks.pendingOpsSummary,
@@ -110,6 +111,28 @@ describe("StatusBar realtime mail events", () => {
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folders", "account-1"] });
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts", "account-1"] });
     expect(mocks.invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ["folders"] });
+  });
+
+  it("refreshes the sidebar unread badge as soon as new mail arrives", async () => {
+    render(<StatusBar />);
+
+    await waitFor(() => expect(mocks.listeners.has("mail:new")).toBe(true));
+
+    mocks.listeners.get("mail:new")?.({
+      payload: {
+        account_id: "account-1",
+        message_id: "message-1",
+        folder_ids: ["folder-inbox"],
+        thread_id: "thread-1",
+        subject: "Hello",
+        from: "sender@example.com",
+        received_at: 1_700_000_000,
+      },
+    });
+
+    // Without this the badge only catches up on the 30s poll, or right after the
+    // mail is read.
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["account-unread-counts"] });
   });
 
   it("shows manual mode when backend reports background sync is stopped", () => {
@@ -157,6 +180,7 @@ describe("StatusBar realtime mail events", () => {
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["messages"] });
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["threads"] });
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["account-unread-counts"] });
   });
 
   it("ignores sync progress from another account", async () => {

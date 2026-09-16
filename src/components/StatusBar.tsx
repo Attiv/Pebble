@@ -9,6 +9,7 @@ import { useMailStore } from "@/stores/mail.store";
 import { stopSync } from "@/lib/api";
 import { useSyncMutation } from "@/hooks/mutations/useSyncMutation";
 import {
+  accountUnreadCountsQueryKey,
   pendingMailOpsSummaryQueryKey,
   usePendingMailOpsSummary,
 } from "@/hooks/queries";
@@ -84,6 +85,7 @@ export default function StatusBar() {
     queryClient.invalidateQueries({ queryKey: ["messages"] });
     queryClient.invalidateQueries({ queryKey: ["threads"] });
     queryClient.invalidateQueries({ queryKey: ["folder-unread-counts"] });
+    queryClient.invalidateQueries({ queryKey: accountUnreadCountsQueryKey });
   }
 
   function isActiveAccountEvent(accountId?: string | null) {
@@ -128,6 +130,10 @@ export default function StatusBar() {
     const unlisten = listen<MailNewPayload>("mail:new", (event) => {
       queryClient.invalidateQueries({ queryKey: ["messages"] });
       queryClient.invalidateQueries({ queryKey: ["threads"] });
+      // The sidebar badge reads this key, and nothing else invalidates it on
+      // delivery: without it the count only catches up on the next 30s poll, or
+      // right after the mail is read (which does refresh every unread view).
+      queryClient.invalidateQueries({ queryKey: accountUnreadCountsQueryKey });
       if (event.payload.account_id) {
         queryClient.invalidateQueries({ queryKey: ["folders", event.payload.account_id] });
         queryClient.invalidateQueries({ queryKey: ["folder-unread-counts", event.payload.account_id] });
