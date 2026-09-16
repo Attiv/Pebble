@@ -2,11 +2,13 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   getTranslateConfig,
+  listTranslateModels,
   saveTranslateConfig,
   testTranslateConnection,
 } from "../../lib/api";
 import { useToastStore } from "@/stores/toast.store";
 import { extractErrorMessage } from "../../lib/extractErrorMessage";
+import ModelPicker from "./ModelPicker";
 
 type ProviderType = "deeplx" | "deepl" | "generic_api" | "llm";
 
@@ -346,15 +348,15 @@ export default function TranslateTab() {
               />
             </div>
             <div style={fieldGroupStyle}>
-              <label htmlFor="translate-llm-model" style={labelStyle}>{t("translate.model")}</label>
-              <input
+              <ModelPicker
                 id="translate-llm-model"
                 name="llm_model"
-                style={inputStyle}
+                label={t("translate.model")}
                 value={llmModel}
-                onChange={(e) => setLlmModel(e.target.value)}
+                onChange={setLlmModel}
+                fetchModels={() => listTranslateModels(buildConfigJson())}
+                cacheKey={llmEndpoint}
                 placeholder="gpt-4o-mini"
-                autoComplete="off"
               />
             </div>
             <div style={fieldGroupStyle}>

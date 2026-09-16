@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { getAiConfig, saveAiConfig, testAiConnection } from "../../lib/api";
+import { getAiConfig, listAiModels, saveAiConfig, testAiConnection } from "../../lib/api";
 import type { AiApiMode, AiProviderType } from "../../lib/api";
 import { useToastStore } from "@/stores/toast.store";
 import { extractErrorMessage } from "../../lib/extractErrorMessage";
+import ModelPicker from "./ModelPicker";
 
 const PROVIDER_OPTIONS: { value: AiProviderType; labelKey: string }[] = [
   { value: "openai_compatible", labelKey: "ai.providerOpenAi" },
@@ -193,6 +194,12 @@ export default function AiTab() {
               placeholder="local-model"
               autoComplete="off"
             />
+            <p style={{ fontSize: "11.5px", lineHeight: 1.5, color: "var(--color-text-secondary)", margin: "4px 0 0" }}>
+              {t(
+                "settings.modelManualOnly",
+                "This provider has no standard model list, so the name is typed by hand.",
+              )}
+            </p>
           </div>
           <div style={fieldGroupStyle}>
             <label htmlFor="ai-generic-prompt-param" style={labelStyle}>{t("ai.promptParam")}</label>
@@ -250,15 +257,15 @@ export default function AiTab() {
           />
         </div>
         <div style={fieldGroupStyle}>
-          <label htmlFor="ai-model" style={labelStyle}>{t("translate.model")}</label>
-          <input
+          <ModelPicker
             id="ai-model"
             name="ai_model"
-            style={inputStyle}
+            label={t("translate.model")}
             value={model}
-            onChange={(e) => setModel(e.target.value)}
+            onChange={setModel}
+            fetchModels={() => listAiModels(buildConfigJson())}
+            cacheKey={endpoint}
             placeholder="gpt-4o-mini"
-            autoComplete="off"
           />
         </div>
         <div style={fieldGroupStyle}>
