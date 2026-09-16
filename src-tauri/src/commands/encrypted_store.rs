@@ -9,6 +9,11 @@ pub(crate) const ACCOUNT_AUTH_DATA_PURPOSE: &str = "accounts.auth_data";
 pub(crate) const SECURE_USER_DATA_PURPOSE: &str = "secure_user_data.value";
 pub(crate) const TRANSLATE_CONFIG_PURPOSE: &str = "translate_config.config";
 pub(crate) const ACTIVE_TRANSLATE_CONFIG_ID: &str = "active";
+/// Deliberately distinct from [`TRANSLATE_CONFIG_PURPOSE`]: the AI module's
+/// secret must not be decryptable with the translate config's binding, so the
+/// two can never be swapped for one another.
+pub(crate) const AI_CONFIG_PURPOSE: &str = "ai_config.config";
+pub(crate) const ACTIVE_AI_CONFIG_ID: &str = "active";
 
 pub(crate) async fn lock_secure_user_data_key(state: &AppState, key: &str) -> OwnedMutexGuard<()> {
     let key_lock = {

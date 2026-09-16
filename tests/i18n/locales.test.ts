@@ -119,4 +119,44 @@ describe("locale files", () => {
     expect(zh.accountSetup.tlsCertificateVerification).not.toBe(en.accountSetup.tlsCertificateVerification);
     expect(zh.accountSetup.verifyTlsCerts).not.toBe(en.accountSetup.verifyTlsCerts);
   });
+  it("translates the AI assistant settings in English and Chinese", () => {
+    const en = readLocale("en");
+    const zh = readLocale("zh");
+
+    expect(en.settings.ai).toBe("AI");
+    expect(zh.settings.ai).toBe("AI");
+    expect(en.ai.engineTitle).toBe("AI Assistant");
+    expect(en.ai.summarize).toBe("Summarise email");
+    expect(en.ai.polish).toBe("Polish");
+    expect(en.ai.proofread).toBe("Fix errors");
+    expect(en.ai.helpWrite).toBe("Help me write");
+    expect(zh.ai.engineTitle).toBe("AI 助手");
+    expect(zh.ai.summarize).toBe("总结邮件");
+    expect(zh.ai.polish).toBe("润色");
+    expect(zh.ai.proofread).toBe("纠错");
+    expect(zh.ai.helpWrite).toBe("帮写");
+  });
+
+  it("keeps the AI and translation modules separately labelled", () => {
+    const en = readLocale("en");
+    const zh = readLocale("zh");
+
+    // The AI assistant must read as its own service, not a second translator.
+    expect(en.ai.isolationNote).toContain("separate service from the translation engine");
+    expect(zh.ai.isolationNote).toContain("相互独立");
+    expect(en.ai.engineTranslate).not.toBe(en.ai.engineAi);
+    expect(zh.ai.engineTranslate).not.toBe(zh.ai.engineAi);
+  });
+
+  it("keeps the AI locale keys in step across languages", () => {
+    const en = readLocale("en");
+    const zh = readLocale("zh");
+
+    expect(Object.keys(zh.ai).sort()).toEqual(Object.keys(en.ai).sort());
+    expect(Object.keys(zh.shortcuts).sort()).toEqual(Object.keys(en.shortcuts).sort());
+    expect(zh.shortcuts.ai).toBeTruthy();
+    expect(en.shortcuts.summarizeMessage).toBeTruthy();
+    expect(zh.shortcuts.summarizeMessage).toBeTruthy();
+  });
 });
+

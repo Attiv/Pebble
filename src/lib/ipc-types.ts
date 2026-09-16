@@ -299,6 +299,37 @@ export interface TranslateResult {
   segments: { source: string; target: string }[];
 }
 
+// ─── AI assistant types ─────────────────────────────────────────────────────────
+
+/** @rust pebble-core/src/types.rs → AiConfig */
+export interface AiConfig {
+  id: string;
+  provider_type: string;
+  config: string;
+  is_enabled: boolean;
+  created_at: number;
+  updated_at: number;
+}
+
+export type AiProviderType = "openai_compatible" | "generic";
+
+/** @rust pebble-translate/src/types.rs → LLMMode (shared wire format) */
+export type AiApiMode = "completions" | "responses";
+
+/** @rust pebble-ai/src/types.rs → AiTone */
+export type AiTone = "neutral" | "formal" | "friendly" | "concise";
+
+/** @rust pebble-ai/src/types.rs → AiLength */
+export type AiLength = "short" | "medium" | "long";
+
+/** @rust pebble-ai/src/types.rs → AiResult */
+export interface AiResult {
+  text: string;
+  /** `"ai"` when the AI service answered, `"translate"` when the compose
+   *  translate action fell back to the translate engine. */
+  engine: "ai" | "translate" | string;
+}
+
 // ─── Thread types ───────────────────────────────────────────────────────────────
 
 /** @rust pebble-core/src/types.rs → ThreadSummary */

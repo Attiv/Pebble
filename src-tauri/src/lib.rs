@@ -323,7 +323,7 @@ pub fn run() {
             let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
             let env_filter =
                 tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                    "pebble=info,pebble_store=info,pebble_mail=info,pebble_search=info,pebble_translate=info,pebble_crypto=info,pebble_oauth=info".into()
+                    "pebble=info,pebble_store=info,pebble_mail=info,pebble_search=info,pebble_translate=info,pebble_ai=info,pebble_crypto=info,pebble_oauth=info".into()
                 });
             let stdout_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stdout);
             let file_layer = tracing_subscriber::fmt::layer()
@@ -598,6 +598,17 @@ pub fn run() {
             commands::translate::get_translate_config,
             commands::translate::save_translate_config,
             commands::translate::test_translate_connection,
+            commands::translate::list_translate_models,
+            commands::ai::ai_get_config,
+            commands::ai::ai_save_config,
+            commands::ai::ai_delete_config,
+            commands::ai::ai_test_connection,
+            commands::ai::ai_list_models,
+            commands::ai::ai_summarize_message,
+            commands::ai::ai_polish,
+            commands::ai::ai_proofread,
+            commands::ai::ai_translate,
+            commands::ai::ai_help_write,
             commands::threads::list_thread_messages,
             commands::threads::list_threads,
             commands::oauth::complete_oauth_flow,

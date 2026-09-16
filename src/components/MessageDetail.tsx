@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Clock, Languages } from "lucide-react";
+import { ArrowLeft, Clock, Languages, Sparkles } from "lucide-react";
 import { trustSender } from "@/lib/api";
 import { useTranslation } from "react-i18next";
 import type { PrivacyMode, TranslateResult } from "@/lib/api";
@@ -10,6 +10,7 @@ import AttachmentList from "./AttachmentList";
 import SnoozePopover from "../features/inbox/SnoozePopover";
 import { ShadowDomEmail } from "./ShadowDomEmail";
 import TranslatePopover from "../features/translate/TranslatePopover";
+import AiSummaryCard from "../features/ai/AiSummaryCard";
 import MessageActionToolbar from "./MessageActionToolbar";
 import { useMessageLoader } from "@/hooks/useMessageLoader";
 import { useBilingualTranslation } from "@/hooks/useBilingualTranslation";
@@ -62,6 +63,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
   const [showSnooze, setShowSnooze] = useState(false);
   const [showSelectionActions, setShowSelectionActions] = useState<{ text: string; position: { x: number; y: number } } | null>(null);
   const [showTranslate, setShowTranslate] = useState<{ text: string; position: { x: number; y: number } } | null>(null);
+  const [showAiSummary, setShowAiSummary] = useState(false);
 
   const snoozeRef = useRef<HTMLDivElement>(null);
   const selectionActionsRef = useRef<HTMLDivElement>(null);
@@ -78,6 +80,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
   useEffect(() => {
     setPrivacyOverride({ messageId, mode: defaultPrivacyMode() });
     resetBilingual();
+    setShowAiSummary(false);
   }, [messageId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleLoadImages() {
@@ -185,11 +188,14 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
   useEffect(() => {
     const onTranslate = () => openTranslateForSelection();
     const onBilingual = () => handleBilingualToggle();
+    const onSummarize = () => setShowAiSummary((visible) => !visible);
     document.addEventListener("pebble:translate-selection", onTranslate);
     document.addEventListener("pebble:toggle-bilingual", onBilingual);
+    document.addEventListener("pebble:ai-summarize", onSummarize);
     return () => {
       document.removeEventListener("pebble:translate-selection", onTranslate);
       document.removeEventListener("pebble:toggle-bilingual", onBilingual);
+      document.removeEventListener("pebble:ai-summarize", onSummarize);
     };
   });
 
@@ -337,6 +343,25 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
           >
             <Languages size={16} />
           </button>
+          <button
+            onClick={() => setShowAiSummary((visible) => !visible)}
+            aria-pressed={showAiSummary}
+            style={{
+              background: showAiSummary ? "var(--color-bg-hover)" : "none",
+              border: "none",
+              cursor: "pointer",
+              padding: "4px",
+              borderRadius: "4px",
+              color: showAiSummary ? "var(--color-accent)" : "var(--color-text-secondary)",
+              display: "flex",
+              alignItems: "center",
+              flexShrink: 0,
+            }}
+            title={t("ai.summarize")}
+            aria-label={t("ai.summarize")}
+          >
+            <Sparkles size={16} />
+          </button>
         </div>
         {/* Action Toolbar */}
         <MessageActionToolbar
@@ -392,6 +417,11 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
           onLoadImages={handleLoadImages}
           onTrustSender={handleTrustSender}
         />
+      )}
+
+      {/* AI summary — sits outside the body so reading it can never alter the mail */}
+      {showAiSummary && (
+        <AiSummaryCard messageId={messageId} onClose={() => setShowAiSummary(false)} />
       )}
 
       {/* Body */}

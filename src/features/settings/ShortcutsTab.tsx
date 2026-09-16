@@ -24,6 +24,7 @@ const ACTION_I18N_MAP: Record<string, string> = {
   "toggle-notifications": "shortcuts.toggleNotifications",
   "translate-selection": "shortcuts.translateSelection",
   "toggle-bilingual": "shortcuts.toggleBilingual",
+  "summarize-message": "shortcuts.summarizeMessage",
 };
 
 const SHORTCUT_GROUPS = [
@@ -31,6 +32,7 @@ const SHORTCUT_GROUPS = [
   { categoryKey: "shortcuts.navigation", actions: ["next-message", "prev-message", "open-message", "open-search", "focus-search"] },
   { categoryKey: "shortcuts.mailActions", actions: ["compose-new", "reply", "reply-all", "forward", "toggle-star", "archive-message", "toggle-view-inbox", "toggle-view-kanban"] },
   { categoryKey: "shortcuts.translate", actions: ["translate-selection", "toggle-bilingual"] },
+  { categoryKey: "shortcuts.ai", actions: ["summarize-message"] },
 ];
 
 function ShortcutRow({ actionId }: { actionId: string }) {

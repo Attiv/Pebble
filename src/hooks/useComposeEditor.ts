@@ -48,11 +48,16 @@ interface ShouldApplyInitialEditorContentArgs {
   hasRestoredDraft: boolean;
 }
 
-function escapeHtml(s: string) {
+export function escapeHtml(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-function plainTextToParagraphs(text: string) {
+/**
+ * Turn plain text (as produced by the AI assistant) into editor paragraphs.
+ * Shared with the AI module so generated text enters the rich editor the same
+ * way a prefilled body does.
+ */
+export function plainTextToParagraphs(text: string) {
   return text
     .split(/\r?\n/)
     .map((line) => line.trim() ? `<p>${escapeHtml(line)}</p>` : "<p><br></p>")

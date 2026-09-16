@@ -287,6 +287,9 @@ export function useKeyboard() {
         case "toggle-bilingual":
           document.dispatchEvent(new CustomEvent("pebble:toggle-bilingual"));
           break;
+        case "summarize-message":
+          document.dispatchEvent(new CustomEvent("pebble:ai-summarize"));
+          break;
         default:
           break;
       }

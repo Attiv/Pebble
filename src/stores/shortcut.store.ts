@@ -36,6 +36,7 @@ const DEFAULT_BINDINGS: Record<string, string> = {
   "toggle-notifications": "Ctrl+Shift+N",
   "translate-selection": "T",
   "toggle-bilingual": "Ctrl+Shift+T",
+  "summarize-message": "Ctrl+Shift+S",
 };
 
 const STORAGE_KEY = "pebble-shortcuts";

@@ -1,5 +1,6 @@
 pub mod accounts;
 pub mod advanced_search;
+pub mod ai;
 pub mod appearance;
 pub mod attachments;
 pub mod autostart;

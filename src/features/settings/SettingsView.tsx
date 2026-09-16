@@ -9,10 +9,11 @@ import RulesTab from "./RulesTab";
 import PendingOpsTab from "./PendingOpsTab";
 import ShortcutsTab from "./ShortcutsTab";
 import TranslateTab from "./TranslateTab";
+import AiTab from "./AiTab";
 import PrivacyTab from "./PrivacyTab";
 import AboutTab from "./AboutTab";
 
-const TAB_IDS = ["accounts", "general", "proxy", "appearance", "privacy", "rules", "remoteWrites", "translation", "shortcuts", "cloudSync", "about"] as const;
+const TAB_IDS = ["accounts", "general", "proxy", "appearance", "privacy", "rules", "remoteWrites", "translation", "ai", "shortcuts", "cloudSync", "about"] as const;
 
 const TAB_LABEL_KEYS: Record<string, string> = {
   accounts: "settings.accounts",
@@ -23,6 +24,7 @@ const TAB_LABEL_KEYS: Record<string, string> = {
   rules: "settings.rules",
   remoteWrites: "settings.remoteWrites",
   translation: "settings.translation",
+  ai: "settings.ai",
   shortcuts: "settings.shortcuts",
   cloudSync: "settings.cloudSync",
   about: "settings.about",
@@ -113,6 +115,7 @@ export default function SettingsView() {
         {activeTab === "rules" && <RulesTab />}
         {activeTab === "remoteWrites" && <PendingOpsTab />}
         {activeTab === "translation" && <TranslateTab />}
+        {activeTab === "ai" && <AiTab />}
         {activeTab === "shortcuts" && <ShortcutsTab />}
         {activeTab === "privacy" && <PrivacyTab />}
         {activeTab === "cloudSync" && <CloudSyncTab />}

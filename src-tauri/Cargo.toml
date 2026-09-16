@@ -23,6 +23,7 @@ pebble-mail = { path = "../crates/pebble-mail" }
 pebble-search = { path = "../crates/pebble-search" }
 pebble-rules = { path = "../crates/pebble-rules" }
 pebble-translate = { path = "../crates/pebble-translate" }
+pebble-ai = { path = "../crates/pebble-ai" }
 pebble-crypto = { path = "../crates/pebble-crypto" }
 pebble-oauth = { path = "../crates/pebble-oauth" }
 tauri-plugin-notification = "2"

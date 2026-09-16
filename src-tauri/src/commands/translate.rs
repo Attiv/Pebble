@@ -9,7 +9,7 @@ use pebble_translate::TranslateService;
 use tauri::State;
 
 /// Decode a hex string to bytes.
-fn hex_decode(s: &str) -> std::result::Result<Vec<u8>, PebbleError> {
+pub(crate) fn hex_decode(s: &str) -> std::result::Result<Vec<u8>, PebbleError> {
     let bytes = s.as_bytes();
     if !bytes.len().is_multiple_of(2) {
         return Err(PebbleError::Internal(
@@ -40,7 +40,7 @@ fn hex_nibble(byte: u8) -> Option<u8> {
 }
 
 /// Encode bytes to a hex string.
-fn hex_encode(bytes: &[u8]) -> String {
+pub(crate) fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
@@ -176,19 +176,20 @@ pub async fn save_translate_config(
 }
 
 /// Validate URL(s) in a TranslateProviderConfig.
-fn validate_provider_config(
+pub(crate) fn validate_provider_config(
     provider_config: &TranslateProviderConfig,
 ) -> std::result::Result<(), PebbleError> {
     match provider_config {
-        TranslateProviderConfig::DeepLX { endpoint } => validate_translate_url(endpoint),
-        TranslateProviderConfig::GenericApi { endpoint, .. } => validate_translate_url(endpoint),
-        TranslateProviderConfig::LLM { endpoint, .. } => validate_translate_url(endpoint),
+        TranslateProviderConfig::DeepLX { endpoint } => validate_outbound_url(endpoint),
+        TranslateProviderConfig::GenericApi { endpoint, .. } => validate_outbound_url(endpoint),
+        TranslateProviderConfig::LLM { endpoint, .. } => validate_outbound_url(endpoint),
         TranslateProviderConfig::DeepL { .. } => Ok(()), // uses official API, no custom URL
     }
 }
 
-/// Validate that a translate endpoint URL is safe (HTTPS required, HTTP only for localhost).
-fn validate_translate_url(url: &str) -> std::result::Result<(), PebbleError> {
+/// Validate that an outbound endpoint URL is safe (HTTPS required, HTTP only
+/// for localhost). Shared with the AI module so both apply one policy.
+pub(crate) fn validate_outbound_url(url: &str) -> std::result::Result<(), PebbleError> {
     if url.starts_with("https://") {
         return Ok(());
     }
@@ -234,10 +235,53 @@ pub async fn test_translate_connection(
     Ok(result.translated)
 }
 
+/// The endpoint and key a model listing needs, or the reason there is none.
+///
+/// Split out of the command so the "this provider cannot be listed" rule is
+/// testable without standing up an `AppState`.
+fn translate_model_list_target(
+    config: &TranslateProviderConfig,
+) -> std::result::Result<(&str, &str), PebbleError> {
+    match config {
+        TranslateProviderConfig::LLM {
+            endpoint, api_key, ..
+        } => Ok((endpoint, api_key)),
+        // DeepL and DeepLX publish a fixed model set and the generic engine
+        // posts to a single action URL, so none of them has a list to read.
+        _ => Err(PebbleError::Translate(
+            "Only the LLM provider can list models; the other engines have a fixed model set."
+                .to_string(),
+        )),
+    }
+}
+
+/// Models the configured LLM endpoint offers, for the settings dropdown.
+///
+/// Takes the *unsaved* config so the list can be pulled while the endpoint or
+/// key is still being edited, matching the AI tab's behaviour.
+#[tauri::command]
+pub async fn list_translate_models(
+    state: State<'_, AppState>,
+    config: String,
+) -> std::result::Result<Vec<String>, PebbleError> {
+    let provider_config: TranslateProviderConfig = serde_json::from_str(&config)
+        .map_err(|e| PebbleError::Translate(format!("Invalid config: {e}")))?;
+
+    let (endpoint, api_key) = translate_model_list_target(&provider_config)?;
+    validate_outbound_url(endpoint)?;
+
+    let proxy = get_global_proxy_raw(&state.crypto, &state.store)?;
+    let client = TranslateService::http_client_with_proxy(proxy.as_ref())?;
+    pebble_translate::models::fetch_model_ids(&client, endpoint, Some(api_key))
+        .await
+        .map_err(PebbleError::Translate)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use pebble_store::Store;
+    use pebble_translate::types::LLMMode;
 
     fn save_config(store: &Store, config: &str) {
         let now = now_timestamp();
@@ -251,6 +295,56 @@ mod tests {
                 updated_at: now,
             })
             .unwrap();
+    }
+
+    fn llm_config(endpoint: &str) -> TranslateProviderConfig {
+        TranslateProviderConfig::LLM {
+            endpoint: endpoint.to_string(),
+            api_key: "secret".to_string(),
+            model: "gpt-4o-mini".to_string(),
+            mode: LLMMode::Completions,
+        }
+    }
+
+    #[test]
+    fn model_list_target_accepts_the_llm_provider() {
+        assert_eq!(
+            translate_model_list_target(&llm_config("https://api.openai.com/v1")).unwrap(),
+            ("https://api.openai.com/v1", "secret")
+        );
+    }
+
+    /// DeepL/DeepLX ship a fixed model set and the generic engine has one action
+    /// URL, so listing must refuse instead of probing the wrong URL.
+    #[test]
+    fn model_list_target_refuses_the_engines_without_a_model_list() {
+        let deepl = TranslateProviderConfig::DeepL {
+            api_key: "k".to_string(),
+            use_free_api: false,
+        };
+        let error = translate_model_list_target(&deepl).unwrap_err();
+        assert!(matches!(error, PebbleError::Translate(_)));
+        assert!(error.to_string().contains("Only the LLM provider"));
+
+        let generic = TranslateProviderConfig::GenericApi {
+            endpoint: "https://api.example.com/translate".to_string(),
+            api_key: None,
+            source_lang_param: "source_lang".to_string(),
+            target_lang_param: "target_lang".to_string(),
+            text_param: "text".to_string(),
+            result_path: "data".to_string(),
+        };
+        assert!(translate_model_list_target(&generic).is_err());
+    }
+
+    #[test]
+    fn model_list_target_rejects_an_http_endpoint_before_any_request() {
+        let insecure = llm_config("http://api.example.com");
+        let (endpoint, _) = translate_model_list_target(&insecure).unwrap();
+        assert!(matches!(
+            validate_outbound_url(endpoint),
+            Err(PebbleError::Validation(_))
+        ));
     }
 
     #[test]

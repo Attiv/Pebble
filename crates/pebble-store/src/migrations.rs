@@ -2,7 +2,7 @@ use pebble_core::{build_snippet, PebbleError, Result};
 use rusqlite::{Connection, OptionalExtension};
 use std::collections::HashSet;
 
-const CURRENT_VERSION: u32 = 18;
+const CURRENT_VERSION: u32 = 19;
 const ACCOUNT_COLOR_PRESETS: [&str; 12] = [
     "#0ea5e9", "#22c55e", "#f59e0b", "#8b5cf6", "#f43f5e", "#14b8a6", "#6366f1", "#f97316",
     "#06b6d4", "#ec4899", "#84cc16", "#3b82f6",
@@ -973,6 +973,27 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
                 ALTER TABLE accounts ADD COLUMN oauth_subject TEXT;",
             )?;
         }
+        // Stamp V18's own number: stamping CURRENT_VERSION here would leave a
+        // crash between V18 and V19 recorded as fully migrated.
+        set_schema_version(&tx, 18)?;
+        tx.commit()?;
+    }
+
+    // The AI assistant keeps its provider config in its own table. It is
+    // deliberately not a column on `translate_config`: the two modules may be
+    // pointed at completely different services and must not share a row.
+    if version < 19 {
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS ai_config (
+                 id TEXT PRIMARY KEY DEFAULT 'active',
+                 provider_type TEXT NOT NULL CHECK(provider_type IN ('openai_compatible', 'generic')),
+                 config TEXT NOT NULL DEFAULT '{}',
+                 is_enabled INTEGER NOT NULL DEFAULT 1,
+                 created_at INTEGER NOT NULL,
+                 updated_at INTEGER NOT NULL
+             );",
+        )?;
         set_schema_version(&tx, CURRENT_VERSION)?;
         tx.commit()?;
     }
@@ -1163,6 +1184,96 @@ mod tests {
                 .prepare("SELECT account_label FROM accounts")
                 .is_err(),
             "earlier ALTER must roll back when a later ALTER fails"
+        );
+    }
+
+    /// The previous release stamped `CURRENT_VERSION` at the end of the V18
+    /// block. With V19 added, that would let a crash between the two blocks be
+    /// recorded as "fully migrated" and the AI table would never appear.
+    #[test]
+    fn upgrading_from_v17_runs_the_v18_alter_and_the_v19_table() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE accounts (id TEXT PRIMARY KEY, email TEXT, display_name TEXT, auth_data BLOB);
+             PRAGMA user_version=17;",
+        )
+        .unwrap();
+
+        run_migrations(&conn).unwrap();
+
+        let version: u32 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, CURRENT_VERSION);
+
+        conn.prepare("SELECT account_label FROM accounts")
+            .expect("V18 must still have added the account columns before V19 stamped the version");
+        conn.prepare("SELECT 1 FROM ai_config LIMIT 0")
+            .expect("V19 must have created ai_config in the same run");
+    }
+
+    #[test]
+    fn migration_v19_adds_an_ai_config_table() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA user_version=18;")
+            .unwrap();
+
+        run_migrations(&conn).unwrap();
+
+        let version: u32 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, CURRENT_VERSION);
+
+        conn.execute_batch(
+            "INSERT INTO ai_config
+                (id, provider_type, config, is_enabled, created_at, updated_at)
+             VALUES ('active', 'openai_compatible', '{}', 1, 1, 1);",
+        )
+        .expect("V19 ai_config should accept a valid row");
+
+        let unknown_provider = conn.execute(
+            "INSERT INTO ai_config
+                (id, provider_type, config, is_enabled, created_at, updated_at)
+             VALUES ('other', 'anthropic', '{}', 1, 1, 1)",
+            [],
+        );
+        assert!(
+            unknown_provider.is_err(),
+            "ai_config must reject provider types the app cannot talk to"
+        );
+    }
+
+    #[test]
+    fn fresh_schema_keeps_ai_and_translate_configs_in_separate_tables() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+
+        run_migrations(&conn).unwrap();
+
+        conn.execute_batch(
+            "INSERT INTO ai_config
+                (id, provider_type, config, is_enabled, created_at, updated_at)
+             VALUES ('active', 'generic', 'ai-blob', 1, 1, 1);
+             INSERT INTO translate_config
+                (id, provider_type, config, is_enabled, created_at, updated_at)
+             VALUES ('active', 'deeplx', 'translate-blob', 1, 1, 1);
+             DELETE FROM ai_config WHERE id = 'active';",
+        )
+        .expect("both config tables should be usable side by side");
+
+        let (ai_rows, translate_rows): (i64, i64) = conn
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM ai_config),
+                        (SELECT COUNT(*) FROM translate_config)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(ai_rows, 0);
+        assert_eq!(
+            translate_rows, 1,
+            "clearing the AI config must leave the translate config alone"
         );
     }
 

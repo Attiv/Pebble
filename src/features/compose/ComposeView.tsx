@@ -25,6 +25,7 @@ import { useToastStore } from "@/stores/toast.store";
 import type { Account } from "@/lib/ipc-types";
 import type { ComposeAttachment } from "./compose-draft";
 import { ModeButton, EditorToolbar, MarkdownToolbar, composeStyles } from "./ComposeToolbar";
+import ComposeAiAssistant from "../ai/ComposeAiAssistant";
 import { subjectAfterAddingAttachments } from "./attachment-subject";
 import { isValidEmailAddress, mergePendingRecipient } from "./recipient-utils";
 
@@ -770,6 +771,15 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
                     {htmlPreview ? t("compose.mode.hidePreview", "Hide preview") : t("compose.mode.showPreview", "Show preview")}
                   </button>
                 )}
+                {/* AI writing tools — independent of the translation engine */}
+                <ComposeAiAssistant
+                  editor={editor}
+                  editorMode={editorMode}
+                  rawSource={rawSource}
+                  setRawSource={setRawSource}
+                  textareaRef={textareaRef}
+                  quotedReplyHtml={quotedReplyHtml}
+                />
               </div>
             </div>
 

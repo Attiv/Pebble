@@ -7,6 +7,12 @@ export type {
   AccountProxySetting,
   AddAccountRequest,
   AdvancedSearchQuery,
+  AiApiMode,
+  AiConfig,
+  AiLength,
+  AiProviderType,
+  AiResult,
+  AiTone,
   AppLogSnapshot,
   Attachment,
   BackupPreview,
@@ -50,6 +56,10 @@ import type {
   AccountProxySetting,
   AddAccountRequest,
   AdvancedSearchQuery,
+  AiConfig,
+  AiLength,
+  AiResult,
+  AiTone,
   AppLogSnapshot,
   Attachment,
   BackupPreview,
@@ -615,6 +625,82 @@ export async function saveTranslateConfig(providerType: string, config: string, 
 
 export async function testTranslateConnection(config: string): Promise<string> {
   return invoke<string>("test_translate_connection", { config });
+}
+
+/** Models the LLM endpoint lists at `GET /v1/models`. */
+export async function listTranslateModels(config: string): Promise<string[]> {
+  return invoke<string[]>("list_translate_models", { config });
+}
+
+// ─── AI assistant API ────────────────────────────────────────────────────────
+//
+// A separate command namespace from `translate_*`. The two modules keep their
+// own configuration, so changing one never affects the other; the only place
+// they meet is `aiTranslate`, which falls back to the translate engine when no
+// AI service is configured (the returned `engine` says which one answered).
+
+export async function getAiConfig(): Promise<AiConfig | null> {
+  return invoke<AiConfig | null>("ai_get_config");
+}
+
+export async function saveAiConfig(
+  providerType: string,
+  config: string,
+  isEnabled: boolean,
+): Promise<void> {
+  return invoke<void>("ai_save_config", { providerType, config, isEnabled });
+}
+
+export async function deleteAiConfig(): Promise<void> {
+  return invoke<void>("ai_delete_config");
+}
+
+export async function testAiConnection(config: string): Promise<string> {
+  return invoke<string>("ai_test_connection", { config });
+}
+
+/**
+ * Models the AI endpoint lists at `GET /v1/models`.
+ *
+ * Refused for the Generic provider, whose endpoint is a single action URL with
+ * no standard place to ask — the settings UI offers manual entry there.
+ */
+export async function listAiModels(config: string): Promise<string[]> {
+  return invoke<string[]>("ai_list_models", { config });
+}
+
+/** Summarise a message on the server: the body never makes a round trip. */
+export async function aiSummarizeMessage(
+  messageId: string,
+  targetLang: string,
+): Promise<AiResult> {
+  return invoke<AiResult>("ai_summarize_message", { messageId, targetLang });
+}
+
+export async function aiPolish(text: string, tone: AiTone): Promise<AiResult> {
+  return invoke<AiResult>("ai_polish", { text, tone });
+}
+
+export async function aiProofread(text: string): Promise<AiResult> {
+  return invoke<AiResult>("ai_proofread", { text });
+}
+
+export async function aiTranslate(
+  text: string,
+  fromLang: string,
+  toLang: string,
+): Promise<AiResult> {
+  return invoke<AiResult>("ai_translate", { text, fromLang, toLang });
+}
+
+export async function aiHelpWrite(
+  intent: string,
+  tone: AiTone,
+  length: AiLength,
+  targetLang: string,
+  context?: string,
+): Promise<AiResult> {
+  return invoke<AiResult>("ai_help_write", { intent, tone, length, targetLang, context });
 }
 
 // ─── Thread API ──────────────────────────────────────────────────────────────

@@ -3575,6 +3575,7 @@ dependencies = [
  "mac-notification-sys",
  "notify-rust",
  "opener",
+ "pebble-ai",
  "pebble-core",
  "pebble-crypto",
  "pebble-mail",
@@ -3600,6 +3601,19 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "windows-registry",
+]
+
+[[package]]
+name = "pebble-ai"
+version = "0.1.5"
+dependencies = [
+ "pebble-core",
+ "pebble-translate",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -293,6 +293,19 @@ pub struct TranslateConfig {
     pub updated_at: i64,
 }
 
+/// Provider configuration for the AI assistant. Same shape as
+/// [`TranslateConfig`] so the settings UI can mirror the translate tab, but
+/// persisted in its own table so the two services stay independent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiConfig {
+    pub id: String,
+    pub provider_type: String,
+    pub config: String,
+    pub is_enabled: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThreadSummary {
     pub thread_id: String,

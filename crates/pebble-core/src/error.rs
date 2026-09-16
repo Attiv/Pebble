@@ -17,6 +17,8 @@ pub enum PebbleError {
     Rule(String),
     #[error("Translate error: {0}")]
     Translate(String),
+    #[error("AI error: {0}")]
+    Ai(String),
     #[error("Privacy error: {0}")]
     Privacy(String),
     #[error("Internal error: {0}")]

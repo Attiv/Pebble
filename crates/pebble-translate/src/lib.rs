@@ -2,6 +2,7 @@ pub mod deepl;
 pub mod deeplx;
 pub mod generic;
 pub mod llm;
+pub mod models;
 pub mod types;
 
 use pebble_core::{HttpProxyConfig, PebbleError, Result};

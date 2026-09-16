@@ -1,5 +1,6 @@
 pub mod accounts;
 pub use accounts::SyncState;
+pub mod ai_config;
 pub mod attachments;
 pub mod auth_data;
 pub mod cloud_sync;
