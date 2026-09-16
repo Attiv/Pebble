@@ -157,7 +157,7 @@ export interface SearchHit {
  * as `{ VariantName: value }`.
  * @rust pebble-core/src/types.rs → PrivacyMode
  */
-export type PrivacyMode = "Strict" | { TrustSender: string } | "LoadOnce" | "Off";
+export type PrivacyMode = "Strict" | { TrustedSender: string } | "LoadOnce" | "Off";
 
 // ─── Mail config types ──────────────────────────────────────────────────────────
 

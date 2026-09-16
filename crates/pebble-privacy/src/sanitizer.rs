@@ -113,7 +113,7 @@ fn extract_body_fragment(raw_html: &str) -> String {
 fn allow_embedded_styles(mode: &PrivacyMode) -> bool {
     matches!(
         mode,
-        PrivacyMode::LoadOnce | PrivacyMode::Off | PrivacyMode::TrustSender(_)
+        PrivacyMode::LoadOnce | PrivacyMode::Off | PrivacyMode::TrustedSender(_)
     )
 }
 
@@ -905,8 +905,12 @@ fn process_img_tag(
     trackers_blocked: &mut Vec<TrackerInfo>,
     images_blocked: &mut u32,
 ) -> ImgAction {
-    // Only explicitly disabling privacy bypasses image/tracker blocking.
-    if matches!(mode, PrivacyMode::Off) {
+    // Disabling privacy bypasses image/tracker blocking, and so does a fully
+    // trusted sender: "trust sender" is documented as lifting tracker blocking
+    // for that sender, so it must behave like Off here rather than silently
+    // matching LoadOnce. External stylesheets are still dropped — see
+    // `allow_external_stylesheets`.
+    if matches!(mode, PrivacyMode::Off | PrivacyMode::TrustedSender(_)) {
         return ImgAction::Keep;
     }
 
@@ -940,7 +944,7 @@ fn process_img_tag(
                     *images_blocked += 1;
                     return ImgAction::BlockedPlaceholder;
                 }
-                PrivacyMode::LoadOnce | PrivacyMode::TrustSender(_) | PrivacyMode::Off => {
+                PrivacyMode::LoadOnce | PrivacyMode::TrustedSender(_) | PrivacyMode::Off => {
                     return ImgAction::Keep;
                 }
             }
@@ -1293,38 +1297,52 @@ mod tests {
     }
 
     #[test]
-    fn trust_sender_still_blocks_tracking_pixels() {
+    fn trusted_sender_loads_tracking_pixels() {
         let guard = PrivacyGuard::new();
         let html = r#"<p>Hello</p><img src="https://tracker.example.com/pixel.gif" width="1" height="1"><p>World</p>"#;
         let result = guard.render_safe_html(
             html,
-            &PrivacyMode::TrustSender("trusted@example.com".to_string()),
+            &PrivacyMode::TrustedSender("trusted@example.com".to_string()),
         );
-        assert!(!result.html.contains("tracker.example.com"));
-        assert_eq!(result.trackers_blocked.len(), 1);
+        assert!(result.html.contains("tracker.example.com"));
+        assert!(result.trackers_blocked.is_empty());
         assert_eq!(result.images_blocked, 0);
     }
 
     #[test]
-    fn trust_sender_still_blocks_known_tracker_domains() {
+    fn trusted_sender_loads_known_tracker_domains() {
         let guard = PrivacyGuard::new();
         let html = r#"<p>Hello</p><img src="https://tracking.mailchimp.com/open.gif" width="100" height="50"><p>World</p>"#;
         let result = guard.render_safe_html(
             html,
-            &PrivacyMode::TrustSender("trusted@example.com".to_string()),
+            &PrivacyMode::TrustedSender("trusted@example.com".to_string()),
         );
-        assert!(!result.html.contains("mailchimp.com"));
+        assert!(result.html.contains("mailchimp.com"));
+        assert!(result.trackers_blocked.is_empty());
+        assert_eq!(result.images_blocked, 0);
+    }
+
+    #[test]
+    fn load_once_still_reports_a_sender_as_being_boxed_in() {
+        // Guards the difference between the two trust levels: images-only trust
+        // resolves to LoadOnce, which must keep stripping trackers.
+        let guard = PrivacyGuard::new();
+        let html = r#"<img src="https://tracker.example.com/pixel.gif" width="1" height="1"><img src="https://example.com/photo.jpg" width="640" height="480">"#;
+        let result = guard.render_safe_html(html, &PrivacyMode::LoadOnce);
+
+        assert!(!result.html.contains("tracker.example.com"));
+        assert!(result.html.contains("https://example.com/photo.jpg"));
         assert_eq!(result.trackers_blocked.len(), 1);
         assert_eq!(result.images_blocked, 0);
     }
 
     #[test]
-    fn trust_sender_allows_non_tracker_remote_images() {
+    fn trusted_sender_allows_non_tracker_remote_images() {
         let guard = PrivacyGuard::new();
         let html = r#"<img src="https://example.com/photo.jpg" width="640" height="480">"#;
         let result = guard.render_safe_html(
             html,
-            &PrivacyMode::TrustSender("trusted@example.com".to_string()),
+            &PrivacyMode::TrustedSender("trusted@example.com".to_string()),
         );
 
         assert!(result.html.contains("https://example.com/photo.jpg"));
@@ -1466,12 +1484,12 @@ mod tests {
     }
 
     #[test]
-    fn trust_sender_drops_external_stylesheet_links() {
+    fn trusted_sender_drops_external_stylesheet_links() {
         let guard = PrivacyGuard::new();
         let html = r#"<html><head><link rel="stylesheet" href="https://cdn.example.com/mail.css"></head><body><p>Visible body</p></body></html>"#;
         let result = guard.render_safe_html(
             html,
-            &PrivacyMode::TrustSender("trusted@example.com".to_string()),
+            &PrivacyMode::TrustedSender("trusted@example.com".to_string()),
         );
 
         assert!(!result.html.contains("cdn.example.com"));

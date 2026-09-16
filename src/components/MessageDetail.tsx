@@ -88,11 +88,16 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
     if (message) {
       try {
         await trustSender(message.account_id, message.from_address, trustType);
-        if (trustType === "all") {
-          setPrivacyOverride({ messageId, mode: { TrustSender: message.from_address } });
-        } else {
-          setPrivacyOverride({ messageId, mode: "LoadOnce" });
-        }
+        // "images" only widens this render to LoadOnce; the backend re-reads the
+        // persisted trust level and can raise it later. "all" asks for full
+        // trust, which the backend confirms against the stored row before
+        // letting trackers load.
+        setPrivacyOverride({
+          messageId,
+          mode: trustType === "all"
+            ? { TrustedSender: message.from_address }
+            : "LoadOnce",
+        });
       } catch (err) {
         console.error("Failed to persist trusted sender:", err);
       }

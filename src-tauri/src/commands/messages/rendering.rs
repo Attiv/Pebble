@@ -59,27 +59,49 @@ pub async fn is_trusted_sender(
         .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?
 }
 
+/// Fold the sender's persisted trust level into the caller's requested mode.
+///
+/// Two invariants hold here:
+///
+/// 1. A sender override must name the message's own sender *and* be backed by a
+///    persisted `trusted_senders` row. A caller cannot grant itself trust.
+/// 2. The persisted level caps the request. It can lift a sender above the
+///    default (which is what makes `trusted_senders` useful at all), but the
+///    caller can never ask for more than what is stored: `Images` resolves to
+///    `LoadOnce` (remote images load, trackers stay stripped) and only `All`
+///    resolves to `TrustedSender` (trackers load too).
 fn resolve_privacy_mode(
     store: &Store,
     message: &Message,
     privacy_mode: PrivacyMode,
 ) -> std::result::Result<PrivacyMode, PebbleError> {
+    let persisted = store.is_trusted_sender(&message.account_id, &message.from_address)?;
+
+    let trust_to_mode = |trust: TrustType| match trust {
+        TrustType::All => PrivacyMode::TrustedSender(message.from_address.clone()),
+        TrustType::Images => PrivacyMode::LoadOnce,
+    };
+
     match privacy_mode {
-        PrivacyMode::Strict | PrivacyMode::LoadOnce => {
-            match store.is_trusted_sender(&message.account_id, &message.from_address)? {
-                Some(TrustType::All | TrustType::Images) => Ok(PrivacyMode::LoadOnce),
-                None => Ok(privacy_mode),
-            }
-        }
-        PrivacyMode::TrustSender(sender)
+        // Explicit per-message override coming from the privacy banner.
+        PrivacyMode::TrustedSender(sender)
             if sender.eq_ignore_ascii_case(message.from_address.trim()) =>
         {
-            match store.is_trusted_sender(&message.account_id, &message.from_address)? {
-                Some(TrustType::All | TrustType::Images) => Ok(PrivacyMode::LoadOnce),
-                None => Ok(PrivacyMode::Strict),
-            }
+            Ok(match persisted {
+                Some(trust) => trust_to_mode(trust),
+                None => PrivacyMode::Strict,
+            })
         }
-        PrivacyMode::TrustSender(_) => Ok(PrivacyMode::Strict),
+        // Override naming a different sender: fall back to the strictest mode
+        // rather than letting the override travel to another message.
+        PrivacyMode::TrustedSender(_) => Ok(PrivacyMode::Strict),
+
+        // Regular modes: persisted trust still lifts the sender above the
+        // requested mode; the request itself is never weakened otherwise.
+        PrivacyMode::Strict | PrivacyMode::LoadOnce => match persisted {
+            Some(trust) => Ok(trust_to_mode(trust)),
+            None => Ok(privacy_mode),
+        },
         PrivacyMode::Off => Ok(PrivacyMode::Off),
     }
 }
@@ -177,8 +199,17 @@ mod tests {
     }
 
     #[test]
-    fn persistent_all_trust_resolves_to_tracker_safe_image_loading() {
+    fn fully_trusted_sender_lifts_tracker_blocking_in_relaxed_mode() {
         let (store, message) = store_with_trusted_sender(TrustType::All);
+
+        let mode = resolve_privacy_mode(&store, &message, PrivacyMode::LoadOnce).unwrap();
+
+        assert!(matches!(mode, PrivacyMode::TrustedSender(_)));
+    }
+
+    #[test]
+    fn images_only_trust_loads_images_without_lifting_tracker_blocking() {
+        let (store, message) = store_with_trusted_sender(TrustType::Images);
 
         let mode = resolve_privacy_mode(&store, &message, PrivacyMode::LoadOnce).unwrap();
 
@@ -186,17 +217,38 @@ mod tests {
     }
 
     #[test]
-    fn sender_override_with_persistent_all_trust_stays_tracker_safe() {
+    fn images_only_trust_also_helps_in_strict_mode() {
+        let (store, message) = store_with_trusted_sender(TrustType::Images);
+
+        let mode = resolve_privacy_mode(&store, &message, PrivacyMode::Strict).unwrap();
+
+        assert!(matches!(mode, PrivacyMode::LoadOnce));
+    }
+
+    #[test]
+    fn untrusted_sender_keeps_the_requested_mode() {
+        let store = Store::open_in_memory().unwrap();
+        let account = make_account("account-1");
+        store.insert_account(&account).unwrap();
+        let message = make_message(&account.id, "stranger@example.com");
+
+        let mode = resolve_privacy_mode(&store, &message, PrivacyMode::Strict).unwrap();
+
+        assert!(matches!(mode, PrivacyMode::Strict));
+    }
+
+    #[test]
+    fn sender_override_with_persistent_all_trust_reaches_full_trust() {
         let (store, message) = store_with_trusted_sender(TrustType::All);
 
         let mode = resolve_privacy_mode(
             &store,
             &message,
-            PrivacyMode::TrustSender("trusted@example.com".to_string()),
+            PrivacyMode::TrustedSender("trusted@example.com".to_string()),
         )
         .unwrap();
 
-        assert!(matches!(mode, PrivacyMode::LoadOnce));
+        assert!(matches!(mode, PrivacyMode::TrustedSender(_)));
     }
 
     #[test]
@@ -207,7 +259,7 @@ mod tests {
         let mode = resolve_privacy_mode(
             &store,
             &message,
-            PrivacyMode::TrustSender("trusted@example.com".to_string()),
+            PrivacyMode::TrustedSender("trusted@example.com".to_string()),
         )
         .unwrap();
 
@@ -224,7 +276,7 @@ mod tests {
         let mode = resolve_privacy_mode(
             &store,
             &message,
-            PrivacyMode::TrustSender("sender@example.com".to_string()),
+            PrivacyMode::TrustedSender("sender@example.com".to_string()),
         )
         .unwrap();
 
@@ -238,7 +290,7 @@ mod tests {
         let mode = resolve_privacy_mode(
             &store,
             &message,
-            PrivacyMode::TrustSender("trusted@example.com".to_string()),
+            PrivacyMode::TrustedSender("trusted@example.com".to_string()),
         )
         .unwrap();
 

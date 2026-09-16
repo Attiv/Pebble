@@ -201,7 +201,7 @@ describe("MessageDetail selected-text context actions", () => {
     await waitFor(() => {
       expect(privacyMocks.calls.at(-1)).toEqual({
         messageId: "message-1",
-        privacyMode: { TrustSender: "sender@example.com" },
+        privacyMode: { TrustedSender: "sender@example.com" },
       });
     });
 

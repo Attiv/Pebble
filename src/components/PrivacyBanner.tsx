@@ -59,6 +59,10 @@ export default function PrivacyBanner({ rendered, onLoadImages, onTrustSender }:
           </button>
           <button
             onClick={() => onTrustSender("images")}
+            title={t(
+              "privacy.trustImagesHint",
+              "Always load images from this sender. Trackers stay blocked.",
+            )}
             style={{
               fontSize: "12px",
               padding: "2px 8px",
@@ -75,6 +79,10 @@ export default function PrivacyBanner({ rendered, onLoadImages, onTrustSender }:
       )}
       <button
         onClick={() => onTrustSender("all")}
+        title={t(
+          "privacy.trustAllHint",
+          "Fully trust this sender: load images and stop stripping trackers.",
+        )}
         style={{
           fontSize: "12px",
           padding: "2px 8px",
@@ -85,7 +93,7 @@ export default function PrivacyBanner({ rendered, onLoadImages, onTrustSender }:
           cursor: "pointer",
         }}
       >
-        {t("privacy.trustSender", "Trust sender")}
+        {t("privacy.trustAll", "Trust sender")}
       </button>
     </div>
   );

@@ -249,7 +249,14 @@ pub struct Rule {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PrivacyMode {
     Strict,
-    TrustSender(String),
+    /// The sender is fully trusted for this message: remote images load and
+    /// known tracking pixels / tracker domains are no longer stripped.
+    ///
+    /// Carries the sender address so a caller cannot reuse the override for a
+    /// different sender — `resolve_privacy_mode` re-checks it against the
+    /// message and against the persisted `trusted_senders` row. External
+    /// stylesheets stay blocked (only [`PrivacyMode::Off`] allows those).
+    TrustedSender(String),
     LoadOnce,
     Off,
 }
