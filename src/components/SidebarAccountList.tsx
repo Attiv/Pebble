@@ -19,11 +19,18 @@ interface Props {
   onSelect: (accountId: string | null) => void;
 }
 
-const AVATAR_SIZE = 22;
+const AVATAR_SIZE = 24;
+
+/** Counts above this read as `99+`, so the pill never grows past two digits. */
+const BADGE_CAP = 99;
 
 function initialOf(text: string): string {
   const trimmed = text.trim();
   return trimmed ? trimmed.charAt(0).toUpperCase() : "?";
+}
+
+function formatUnread(count: number): string {
+  return count > BADGE_CAP ? `${BADGE_CAP}+` : String(count);
 }
 
 function avatarStyle(isActive: boolean, collapsed: boolean): React.CSSProperties {
@@ -44,15 +51,70 @@ function avatarStyle(isActive: boolean, collapsed: boolean): React.CSSProperties
   };
 }
 
-function badgeStyle(isActive: boolean): React.CSSProperties {
+/**
+ * Wraps an avatar so the unread badge can be pinned to its corner without
+ * taking part in the row's layout — a badge that reserves space would push the
+ * address sideways every time mail arrives.
+ */
+function avatarStackStyle(): React.CSSProperties {
+  return { position: "relative", display: "inline-flex", flexShrink: 0 };
+}
+
+/**
+ * The unread count, as a pill on the avatar.
+ *
+ * A bare number at the far end of the row reads as one more trailing control
+ * next to the mark-all-read action, and it disappears completely when the
+ * sidebar is collapsed — which is when a mailbox's state is hardest to read any
+ * other way. Pinning the count to the avatar keeps it attached to the mailbox
+ * it belongs to at both widths.
+ *
+ * The 3px offset lets the pill overlap the avatar's corner while staying inside
+ * the row's own padding, so the list keeps its current row spacing and nothing
+ * clips against the row above.
+ */
+function unreadBadgeStyle(): React.CSSProperties {
   return {
-    flexShrink: 0,
-    fontSize: "11px",
-    fontWeight: 600,
-    minWidth: "16px",
-    textAlign: "right",
-    color: isActive ? "var(--color-accent)" : "var(--color-text-secondary)",
+    position: "absolute",
+    top: "-3px",
+    left: "-3px",
+    minWidth: "14px",
+    height: "14px",
+    padding: "0 4px",
+    boxSizing: "border-box",
+    borderRadius: "7px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "var(--color-accent)",
+    color: "#ffffff",
+    fontSize: "9.5px",
+    fontWeight: 700,
+    lineHeight: 1,
+    fontVariantNumeric: "tabular-nums",
+    pointerEvents: "none",
   };
+}
+
+/**
+ * The count is hidden from assistive tech on purpose: the row's own accessible
+ * name already spells out "3 unread", so announcing the pill as well would say
+ * the same thing twice.
+ */
+function UnreadBadge({
+  count,
+  testId,
+  title,
+}: {
+  count: number;
+  testId: string;
+  title: string;
+}) {
+  return (
+    <span data-testid={testId} title={title} aria-hidden="true" style={unreadBadgeStyle()}>
+      {formatUnread(count)}
+    </span>
+  );
 }
 
 /**
@@ -114,9 +176,22 @@ export default function SidebarAccountList({
     };
   }
 
+  /**
+   * Collapsed rows lose their label, so the accessible name is the only place a
+   * reader can learn how much mail is waiting. The badge itself is decorative.
+   */
+  function accessibleLabelOf(label: string, unreadText: string | null): string {
+    return unreadText ? `${label} · ${unreadText}` : label;
+  }
+
   function handleSelect(accountId: string | null) {
     onSelect(accountId);
   }
+
+  const allUnreadText = showUnread && totalUnread > 0
+    ? t("sidebar.unreadCount", "{{count}} unread", { count: totalUnread })
+    : null;
+  const allLabel = accessibleLabelOf(t("sidebar.allAccounts", "All accounts"), allUnreadText);
 
   return (
     <div
@@ -148,21 +223,25 @@ export default function SidebarAccountList({
             type="button"
             onClick={() => handleSelect(null)}
             aria-current={allSelected ? "true" : undefined}
-            aria-label={t("sidebar.allAccounts", "All accounts")}
-            title={collapsed ? t("sidebar.allAccounts", "All accounts") : undefined}
+            aria-label={collapsed ? allLabel : undefined}
+            title={collapsed ? allLabel : undefined}
             style={selectButtonStyle(allSelected)}
           >
-            <span style={avatarStyle(allSelected, collapsed)} aria-hidden="true">
-              <Layers size={collapsed ? 14 : 12} />
+            <span style={avatarStackStyle()}>
+              <span style={avatarStyle(allSelected, collapsed)} aria-hidden="true">
+                <Layers size={collapsed ? 14 : 12} />
+              </span>
+              {allUnreadText && (
+                <UnreadBadge
+                  count={totalUnread}
+                  testId="account-unread-all"
+                  title={allUnreadText}
+                />
+              )}
             </span>
             {!collapsed && (
               <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {t("sidebar.allAccounts", "All accounts")}
-              </span>
-            )}
-            {!collapsed && showUnread && totalUnread > 0 && (
-              <span data-testid="account-unread-all" style={badgeStyle(allSelected)}>
-                {totalUnread}
               </span>
             )}
           </button>
@@ -176,6 +255,9 @@ export default function SidebarAccountList({
         // Only repeat the address on a second line when it differs from the label.
         const secondary = account.account_label?.trim() ? account.email : null;
         const full = accountOptionLabel(account);
+        const unreadText = showUnread && unread > 0
+          ? t("sidebar.unreadCount", "{{count}} unread", { count: unread })
+          : null;
 
         return (
           <div
@@ -193,12 +275,21 @@ export default function SidebarAccountList({
               type="button"
               onClick={() => handleSelect(account.id)}
               aria-current={isActive ? "true" : undefined}
-              aria-label={collapsed ? full : undefined}
-              title={collapsed ? full : undefined}
+              aria-label={collapsed ? accessibleLabelOf(full, unreadText) : undefined}
+              title={collapsed ? accessibleLabelOf(full, unreadText) : undefined}
               style={selectButtonStyle(isActive)}
             >
-              <span style={avatarStyle(isActive, collapsed)} aria-hidden="true">
-                {initialOf(label)}
+              <span style={avatarStackStyle()}>
+                <span style={avatarStyle(isActive, collapsed)} aria-hidden="true">
+                  {initialOf(label)}
+                </span>
+                {unreadText && (
+                  <UnreadBadge
+                    count={unread}
+                    testId={`account-unread-${account.id}`}
+                    title={unreadText}
+                  />
+                )}
               </span>
               {!collapsed && (
                 <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "1px" }}>
@@ -227,11 +318,6 @@ export default function SidebarAccountList({
                       {secondary}
                     </span>
                   )}
-                </span>
-              )}
-              {!collapsed && showUnread && unread > 0 && (
-                <span data-testid={`account-unread-${account.id}`} style={badgeStyle(isActive)}>
-                  {unread}
                 </span>
               )}
             </button>

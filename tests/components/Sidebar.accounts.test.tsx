@@ -16,7 +16,13 @@ vi.mock("react-i18next", () => ({
     init: vi.fn(),
   },
   useTranslation: () => ({
-    t: (key: string, fallback?: string) => fallback ?? key,
+    // Interpolates, so a test can assert the wording a reader actually gets
+    // ("3 unread") rather than the raw placeholder.
+    t: (key: string, fallback?: string, options?: Record<string, unknown>) => {
+      const text = fallback ?? key;
+      if (!options) return text;
+      return text.replace(/\{\{(\w+)\}\}/g, (_, name: string) => String(options[name] ?? ""));
+    },
   }),
 }));
 
@@ -250,5 +256,51 @@ describe("Sidebar account list", () => {
     expect(screen.queryByText("Work")).toBeNull();
     expect(screen.getByLabelText("Work · me@work.example")).toBeTruthy();
     expect(screen.getByLabelText("me@icloud.com")).toBeTruthy();
+  });
+
+  it("pins the unread count to the avatar's corner", () => {
+    mocks.counts = { "account-work": 3 };
+    useUIStore.setState({ showFolderUnreadCount: true });
+    renderSidebar();
+
+    const badge = screen.getByTestId("account-unread-account-work");
+    // Overlaid on the avatar rather than laid out beside the address, so mail
+    // arriving never shifts the label.
+    expect(badge.style.position).toBe("absolute");
+    const avatar = badge.parentElement?.firstElementChild as HTMLElement;
+    expect(avatar.style.borderRadius).toBe("50%");
+
+    // Stated once: the row no longer repeats the number at its far end.
+    expect(screen.getByTestId("account-row-account-work").textContent?.match(/3/g)).toHaveLength(1);
+    // A mailbox with nothing waiting gets no badge at all.
+    expect(screen.queryByTestId("account-unread-account-personal")).toBeNull();
+  });
+
+  it("keeps counting while the sidebar is collapsed", () => {
+    // Collapsed rows show no label and no folder list, so the badge is the only
+    // remaining signal that a mailbox has mail waiting.
+    mocks.counts = { "account-personal": 7 };
+    useUIStore.setState({ showFolderUnreadCount: true, sidebarCollapsed: true });
+    renderSidebar();
+
+    expect(screen.getByTestId("account-unread-account-personal").textContent).toBe("7");
+  });
+
+  it("spells the count out in a collapsed row's name", () => {
+    mocks.counts = { "account-work": 3 };
+    useUIStore.setState({ showFolderUnreadCount: true, sidebarCollapsed: true });
+    renderSidebar();
+
+    expect(screen.getByLabelText("Work · me@work.example · 3 unread")).toBeTruthy();
+  });
+
+  it("caps a large count so the badge keeps its width", () => {
+    mocks.counts = { "account-work": 128, "account-personal": 4 };
+    useUIStore.setState({ showFolderUnreadCount: true });
+    renderSidebar();
+
+    expect(screen.getByTestId("account-unread-account-work").textContent).toBe("99+");
+    // The combined row is capped the same way, even though its total is 132.
+    expect(screen.getByTestId("account-unread-all").textContent).toBe("99+");
   });
 });

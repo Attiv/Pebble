@@ -16,6 +16,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Each account's unread count now rides on its avatar, as a small badge on the corner, instead of a number at the far end of its row. The trailing number was read as one more control sitting next to the mark-all-read action, and it disappeared entirely when the sidebar was collapsed — which is exactly when a mailbox's state is hardest to read any other way. The count is now attached to the mailbox it belongs to at both widths, the row states it once rather than twice, and anything above 99 reads as `99+` so the badge keeps a single width.
 - The sidebar account picker is now a list instead of a dropdown: every mailbox is visible at once with its own unread count, so accounts can be told apart and switched between at a glance rather than one at a time. Accounts with a custom label show the label and its address on separate lines; the mark-all-read action now rides on the selected row and stays absent for the combined view, where it has no single target. Collapsed sidebars show one initial per account instead of no picker at all.
 - An account's name is shown on message rows, so the setting is now called 账户昵称 in Chinese rather than 账户备注 and its help text says where the value appears. Without a name, rows show the part of the address before `@` — `work@example.com` reads as `work` — unless two mailboxes share that part, in which case the full address is used, because that is the only thing that still tells them apart.
 
