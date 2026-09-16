@@ -3,11 +3,19 @@ import { useTranslation } from "react-i18next";
 import { Copy, Check, X } from "lucide-react";
 import { translateText } from "@/lib/api";
 import { profileLocalStorage } from "@/lib/profileStorage";
+import { useUIStore } from "@/stores/ui.store";
 
 interface Props {
   text: string;
   position: { x: number; y: number };
   onClose: () => void;
+}
+
+const TARGET_LANG_STORAGE_KEY = "pebble-translate-target-lang";
+
+function readSavedTargetLang(): string | null {
+  const saved = profileLocalStorage.getItem(TARGET_LANG_STORAGE_KEY);
+  return saved && saved.trim() ? saved.trim() : null;
 }
 
 export default function TranslatePopover({ text, position, onClose }: Props) {
@@ -16,8 +24,18 @@ export default function TranslatePopover({ text, position, onClose }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const uiLang = profileLocalStorage.getItem("pebble-language") || "zh";
-  const [targetLang, setTargetLang] = useState(uiLang === "en" ? "zh" : "en");
+  // Default to the reader's own language: they selected foreign text because it
+  // is foreign. Picking the "opposite" of the UI language sent English back in
+  // English, which reads as a broken translator.
+  const interfaceLanguage = useUIStore((state) => state.language);
+  const [targetLang, setTargetLang] = useState(
+    () => readSavedTargetLang() ?? interfaceLanguage,
+  );
+
+  function handleTargetLangChange(next: string) {
+    setTargetLang(next);
+    profileLocalStorage.setItem(TARGET_LANG_STORAGE_KEY, next);
+  }
 
   const [privacyAcked, setPrivacyAcked] = useState(() =>
     profileLocalStorage.getItem("pebble-translate-privacy-ack") === "1",
@@ -79,7 +97,7 @@ export default function TranslatePopover({ text, position, onClose }: Props) {
         </span>
         <select
           value={targetLang}
-          onChange={(e) => setTargetLang(e.target.value)}
+          onChange={(e) => handleTargetLangChange(e.target.value)}
           style={{
             fontSize: "11px",
             padding: "2px 4px",

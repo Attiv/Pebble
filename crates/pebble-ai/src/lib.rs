@@ -3,7 +3,7 @@ pub mod types;
 
 use pebble_core::{HttpProxyConfig, PebbleError, Result};
 use pebble_translate::generic::resolve_json_path;
-use pebble_translate::llm::{chat_url, extract_content};
+use pebble_translate::llm::{chat_url, extract_content_or_error};
 use pebble_translate::TranslateService;
 use types::{AiLength, AiProviderConfig, AiTone};
 
@@ -56,7 +56,9 @@ impl AiService {
                 let json =
                     post_json(&client, &chat_url(endpoint, mode), Some(api_key), &body).await?;
 
-                Ok(extract_content(mode, &json).unwrap_or_default())
+                // An empty answer is a failure, not an empty summary: returning
+                // "" here surfaced as a blank card with no explanation.
+                extract_content_or_error(mode, &json).map_err(PebbleError::Ai)
             }
             AiProviderConfig::Generic {
                 endpoint,
@@ -325,5 +327,26 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(error, PebbleError::Ai(_)), "got {error:?}");
+    }
+
+    /// A model that answers with nothing used to surface as an empty string,
+    /// which the UI rendered as a blank card with no explanation.
+    #[tokio::test]
+    async fn an_empty_completion_is_an_error_rather_than_an_empty_answer() {
+        let (base, _captured) =
+            stub_server(r#"{"choices":[{"finish_reason":"length","message":{"content":""}}]}"#);
+        let config = AiProviderConfig::OpenAiCompatible {
+            endpoint: base,
+            api_key: "k".into(),
+            model: "m".into(),
+            mode: LLMMode::Completions,
+        };
+
+        let error = AiService::complete(&config, None, "s", "u")
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, PebbleError::Ai(_)), "got {error:?}");
+        assert!(error.to_string().contains("carried no text"), "got {error}");
     }
 }

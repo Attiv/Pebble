@@ -63,6 +63,8 @@ vi.mock("../../src/hooks/useBilingualTranslation", () => ({
     bilingualMode: false,
     bilingualResult: null,
     bilingualLoading: false,
+    bilingualError: null,
+    bilingualWarning: null,
     handleBilingualToggle: vi.fn(),
     resetBilingual: vi.fn(),
   }),

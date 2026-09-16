@@ -10,10 +10,12 @@ import AttachmentList from "./AttachmentList";
 import SnoozePopover from "../features/inbox/SnoozePopover";
 import { ShadowDomEmail } from "./ShadowDomEmail";
 import TranslatePopover from "../features/translate/TranslatePopover";
+import BilingualView from "../features/translate/BilingualView";
 import AiSummaryCard from "../features/ai/AiSummaryCard";
 import MessageActionToolbar from "./MessageActionToolbar";
 import { useMessageLoader } from "@/hooks/useMessageLoader";
 import { useBilingualTranslation } from "@/hooks/useBilingualTranslation";
+import type { BilingualError } from "@/hooks/useBilingualTranslation";
 import { defaultPrivacyMode } from "@/lib/privacyMode";
 import { useKanbanStore } from "@/stores/kanban.store";
 import { useToastStore } from "@/stores/toast.store";
@@ -70,7 +72,15 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
   const translateRef = useRef<HTMLDivElement>(null);
 
   const { message, setMessage, rendered, loading, error } = useMessageLoader(messageId, privacyMode);
-  const { bilingualMode, bilingualResult, bilingualLoading, handleBilingualToggle, resetBilingual } = useBilingualTranslation(messageId, rendered, message);
+  const {
+    bilingualMode,
+    bilingualResult,
+    bilingualLoading,
+    bilingualError,
+    bilingualWarning,
+    handleBilingualToggle,
+    resetBilingual,
+  } = useBilingualTranslation(messageId, rendered, message);
 
   useClickOutside(snoozeRef, showSnooze, () => setShowSnooze(false));
   useClickOutside(selectionActionsRef, !!showSelectionActions, () => setShowSelectionActions(null));
@@ -183,6 +193,32 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
     if (selectedText.length <= 5) return;
     e.preventDefault();
     openSelectionActionsForSelection({ x: e.clientX, y: e.clientY }, selectedText);
+  }
+
+  /**
+   * Say which way the translation failed. "The engine answered but the answer is
+   * unusable" used to be invisible — the untranslated body was rendered as if it
+   * were the translation — so each of those cases now names itself.
+   */
+  function bilingualErrorReason(error: BilingualError | null): string {
+    switch (error?.code) {
+      case "empty":
+        return t(
+          "common.translationEmpty",
+          "The translation service returned no text. Check the engine configuration in Settings.",
+        );
+      case "unchanged":
+        return t(
+          "common.translationUnchanged",
+          "The translation service returned the original text unchanged. The message may already be in the target language, or the model is not translating.",
+        );
+      case "noText":
+        return t("common.translationNoText", "This message has no body text to translate.");
+      default: {
+        const failed = t("common.translationFailed", "Translation failed");
+        return error?.detail ? `${failed}: ${error.detail}` : failed;
+      }
+    }
   }
 
   useEffect(() => {
@@ -436,25 +472,63 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
         {bilingualMode && bilingualLoading ? (
             <div style={{ fontSize: "13px", color: "var(--color-text-secondary)" }}>{t("common.translating", "Translating...")}</div>
         ) : bilingualMode && bilingualResult ? (
-          (bilingualResult as TranslateResult & { _isHtml?: boolean })._isHtml ? (
-            <ShadowDomEmail html={bilingualResult.translated} />
-          ) : (
-            <pre
+          <>
+            {bilingualWarning && (
+              <div
+                role="status"
+                style={{
+                  fontSize: "12px",
+                  color: "var(--color-warning, #e67e22)",
+                  marginBottom: "10px",
+                }}
+              >
+                {t(
+                  "common.translationIncomplete",
+                  "Some content could not be translated ({{done}}/{{total}}).",
+                  { done: bilingualWarning.done, total: bilingualWarning.total },
+                )}
+              </div>
+            )}
+            {(bilingualResult as TranslateResult & { _isHtml?: boolean })._isHtml ? (
+              <ShadowDomEmail html={bilingualResult.translated} />
+            ) : (
+              <BilingualView segments={bilingualResult.segments ?? []} />
+            )}
+          </>
+        ) : bilingualMode ? (
+          <>
+            <div
+              role="alert"
               style={{
-                fontSize: "14px",
-                color: "var(--color-text-primary)",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-                margin: 0,
-                fontFamily: "inherit",
-                lineHeight: 1.7,
+                fontSize: "12px",
+                lineHeight: 1.5,
+                color: "var(--color-error, #dc2626)",
+                border: "1px solid var(--color-border)",
+                borderRadius: "6px",
+                padding: "8px 10px",
+                marginBottom: "12px",
               }}
             >
-              {bilingualResult.translated}
-            </pre>
-          )
-        ) : bilingualMode && !bilingualLoading ? (
-            <div style={{ fontSize: "13px", color: "var(--color-text-secondary)" }}>{t("common.translationFailed", "Translation failed")}</div>
+              {bilingualErrorReason(bilingualError)}
+            </div>
+            {/* The mail itself stays readable — a failed translation must not hide it. */}
+            {rendered && rendered.html ? (
+              <ShadowDomEmail html={rendered.html} />
+            ) : (
+              <pre
+                style={{
+                  fontSize: "13px",
+                  color: "var(--color-text-primary)",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  margin: 0,
+                  fontFamily: "inherit",
+                }}
+              >
+                {message.body_text}
+              </pre>
+            )}
+          </>
         ) : rendered && rendered.html ? (
           <ShadowDomEmail html={rendered.html} />
         ) : (
