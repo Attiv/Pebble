@@ -42,3 +42,9 @@ pnpm-debug.log
 # Claude Code
 .claude/
 pnpm-workspace.yaml
+
+# Agent workspace (local notes and investigation output)
+.workbuddy/
+
+# Ad-hoc debug scripts; they tend to carry live credentials
+/test.py
