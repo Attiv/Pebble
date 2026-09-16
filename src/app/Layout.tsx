@@ -1,4 +1,5 @@
 import TitleBar from "../components/TitleBar";
+import WindowResizeHandles from "../components/WindowResizeHandles";
 import SenderIdentityNotice from "../components/SenderIdentityNotice";
 import Sidebar from "../components/Sidebar";
 import StatusBar from "../components/StatusBar";
@@ -132,6 +133,7 @@ export default function Layout() {
       className={`app-shell flex flex-col h-screen overflow-hidden${backgroundImage ? " app-shell--with-background" : ""}`}
     >
       <AppBackground image={backgroundImage} />
+      <WindowResizeHandles />
       <TitleBar />
       <SenderIdentityNotice />
       <div className="flex flex-1 min-h-0 app-shell-content">
