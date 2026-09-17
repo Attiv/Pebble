@@ -888,6 +888,7 @@
     "tenant": "租户 ID",
     "tenantHint": "组织的目录 ID；个人账号填 common。",
     "clientId": "应用程序（客户端）ID",
+    "refreshTokenStored": "刷新令牌（留空则沿用已保存的那个）",
     "refreshToken": "刷新令牌",
     "refreshTokenHint": "Pebble 会在每次连接前用它换取新的访问令牌，无需再手动粘贴。",
     "clientSecret": "客户端密钥（可选）",
@@ -900,6 +901,7 @@
     "statusSmtpToken": "SMTP：使用 OAuth2 令牌登录",
     "statusSmtpPassword": "SMTP：使用密码登录",
     "statusExpiresIn": "约 {{minutes}} 分钟后自动续期",
-    "statusRenewsNextSync": "下次同步时自动续期"
+    "statusRenewsNextSync": "下次同步时自动续期",
+    "statusTenant": "租户：{{tenant}}"
   }
 }

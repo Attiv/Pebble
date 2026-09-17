@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { getXOAuth2Status, setXOAuth2Refresh } from "@/lib/api";
+import { getXOAuth2Status, setXOAuth2Refresh, triggerSync } from "@/lib/api";
 import type { XOAuth2Status } from "@/lib/api";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import { inputStyle, labelStyle } from "@/styles/form";
@@ -37,11 +37,16 @@ const hintStyle: React.CSSProperties = {
  * The four fields needed to refresh an OAuth2 access token. Controlled, so it
  * can be reused both when adding an account (values submitted afterwards) and
  * when editing one (saved immediately).
+ *
+ * `hasStoredRefreshToken` only relaxes the hint: it tells the person that an
+ * empty field keeps the token the account already has, which is what makes
+ * correcting one of the other fields possible at all.
  */
-export function XOAuth2Fields({ value, onChange, idPrefix }: {
+export function XOAuth2Fields({ value, onChange, idPrefix, hasStoredRefreshToken = false }: {
   value: XOAuth2FormValues;
   onChange: (next: XOAuth2FormValues) => void;
   idPrefix: string;
+  hasStoredRefreshToken?: boolean;
 }) {
   const { t } = useTranslation();
   const set = (key: keyof XOAuth2FormValues) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -84,7 +89,9 @@ export function XOAuth2Fields({ value, onChange, idPrefix }: {
 
       <div>
         <label htmlFor={`${idPrefix}-refresh-token`} style={labelStyle}>
-          {t("xoauth2.refreshToken", "Refresh token")}
+          {hasStoredRefreshToken
+            ? t("xoauth2.refreshTokenStored", "Refresh token (leave blank to keep the stored one)")
+            : t("xoauth2.refreshToken", "Refresh token")}
         </label>
         <input
           id={`${idPrefix}-refresh-token`}
@@ -153,6 +160,11 @@ function StatusLine({ status }: { status: XOAuth2Status }) {
           ? t("xoauth2.statusSmtpToken", "SMTP: signing in with an OAuth2 token")
           : t("xoauth2.statusSmtpPassword", "SMTP: signing in with a password")}
       </div>
+      {status.tenant && (
+        <div>
+          {t("xoauth2.statusTenant", "Tenant: {{tenant}}", { tenant: status.tenant })}
+        </div>
+      )}
       {minutes !== null && status.has_refresh_token && (
         <div>
           {minutes > 0
@@ -161,6 +173,22 @@ function StatusLine({ status }: { status: XOAuth2Status }) {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Whether the form holds enough to run a token exchange. A refresh token of its
+ * own is only required when the account does not already store one, which is
+ * what lets a wrong tenant be corrected on its own.
+ */
+export function canSubmitXOAuth2Form(
+  v: XOAuth2FormValues,
+  hasStoredRefreshToken: boolean,
+): boolean {
+  return (
+    !!v.tenant.trim() &&
+    !!v.clientId.trim() &&
+    (hasStoredRefreshToken || !!v.refreshToken.trim())
   );
 }
 
@@ -180,7 +208,16 @@ export default function XOAuth2Panel({ accountId }: { accountId: string }) {
     let cancelled = false;
     getXOAuth2Status(accountId)
       .then((s) => {
-        if (!cancelled) setStatus(s);
+        if (cancelled) return;
+        setStatus(s);
+        // Show what is actually stored. Prefilling `common` over a stored tenant
+        // GUID would silently undo it on the next save, which is how a working
+        // account ends up back on the rejected endpoint.
+        setForm((prev) => ({
+          ...prev,
+          tenant: s.tenant ?? prev.tenant,
+          clientId: s.client_id ?? prev.clientId,
+        }));
       })
       .catch(() => {
         /* Status is advisory; a failure here should not block the form. */
@@ -189,6 +226,9 @@ export default function XOAuth2Panel({ accountId }: { accountId: string }) {
       cancelled = true;
     };
   }, [accountId]);
+
+  const hasStoredRefreshToken = status?.has_refresh_token ?? false;
+  const canSave = canSubmitXOAuth2Form(form, hasStoredRefreshToken);
 
   async function save() {
     setBusy(true);
@@ -200,11 +240,18 @@ export default function XOAuth2Panel({ accountId }: { accountId: string }) {
         tenant: form.tenant.trim(),
         clientId: form.clientId.trim(),
         clientSecret: form.clientSecret.trim() || undefined,
-        refreshToken: form.refreshToken.trim(),
+        // Left blank, this keeps the token already on the account.
+        refreshToken: form.refreshToken.trim() || undefined,
       });
       setSaved(true);
       setForm((prev) => ({ ...prev, refreshToken: "", clientSecret: "" }));
       setStatus(await getXOAuth2Status(accountId));
+      // A verified token only helps once something connects with it. The sync
+      // worker for a mailbox that has been failing is long finished, so ask for
+      // a sync rather than leaving the account idle until the next launch.
+      triggerSync(accountId, "manual").catch(() => {
+        /* The token is stored either way; the next sync will use it. */
+      });
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -223,12 +270,17 @@ export default function XOAuth2Panel({ accountId }: { accountId: string }) {
 
       {status && <StatusLine status={status} />}
 
-      <XOAuth2Fields value={form} onChange={setForm} idPrefix={`xoauth2-${accountId}`} />
+      <XOAuth2Fields
+        value={form}
+        onChange={setForm}
+        idPrefix={`xoauth2-${accountId}`}
+        hasStoredRefreshToken={hasStoredRefreshToken}
+      />
 
       <div>
         <button
           type="button"
-          disabled={busy || !isXOAuth2FormComplete(form)}
+          disabled={busy || !canSave}
           onClick={() => void save()}
           style={{
             padding: "8px 14px",
@@ -237,8 +289,8 @@ export default function XOAuth2Panel({ accountId }: { accountId: string }) {
             backgroundColor: "var(--color-bg)",
             color: "var(--color-text-primary)",
             fontSize: "13px",
-            cursor: busy || !isXOAuth2FormComplete(form) ? "not-allowed" : "pointer",
-            opacity: busy || !isXOAuth2FormComplete(form) ? 0.6 : 1,
+            cursor: busy || !canSave ? "not-allowed" : "pointer",
+            opacity: busy || !canSave ? 0.6 : 1,
           }}
         >
           {busy

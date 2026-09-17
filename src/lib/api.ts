@@ -955,6 +955,10 @@ export interface XOAuth2Status {
   has_refresh_token: boolean;
   expires_at: number | null;
   expires_in_secs: number | null;
+  /** Tenant the next refresh will be sent to: a directory ID, or "common". */
+  tenant: string | null;
+  client_id: string | null;
+  has_client_secret: boolean;
 }
 
 export interface XOAuth2RefreshInput {
@@ -962,7 +966,8 @@ export interface XOAuth2RefreshInput {
   tenant: string;
   clientId: string;
   clientSecret?: string;
-  refreshToken: string;
+  /** Omit to keep the token already stored for the account. */
+  refreshToken?: string;
 }
 
 /**
@@ -970,6 +975,9 @@ export interface XOAuth2RefreshInput {
  * an access token, which is written into the IMAP password. Resolves only once
  * the token endpoint has accepted the refresh token, so a successful call means
  * the whole chain works.
+ *
+ * Fields left blank keep their stored value, so an account can have its tenant
+ * corrected without re-pasting an unexpired refresh token.
  */
 export async function setXOAuth2Refresh(input: XOAuth2RefreshInput): Promise<void> {
   return invoke<void>("set_xoauth2_refresh", {
@@ -977,7 +985,7 @@ export async function setXOAuth2Refresh(input: XOAuth2RefreshInput): Promise<voi
     tenant: input.tenant,
     clientId: input.clientId,
     clientSecret: input.clientSecret || null,
-    refreshToken: input.refreshToken,
+    refreshToken: input.refreshToken || null,
   });
 }
 

@@ -888,6 +888,7 @@
     "tenant": "Tenant ID",
     "tenantHint": "Your organisation's directory ID, or \"common\" for personal accounts.",
     "clientId": "Application (client) ID",
+    "refreshTokenStored": "Refresh token (leave blank to keep the stored one)",
     "refreshToken": "Refresh token",
     "refreshTokenHint": "Pebble exchanges this for a fresh access token before every connection, so you never have to paste one again.",
     "clientSecret": "Client secret (optional)",
@@ -900,6 +901,7 @@
     "statusSmtpToken": "SMTP: signing in with an OAuth2 token",
     "statusSmtpPassword": "SMTP: signing in with a password",
     "statusExpiresIn": "Token renews in about {{minutes}} min",
-    "statusRenewsNextSync": "Token renews on the next sync"
+    "statusRenewsNextSync": "Token renews on the next sync",
+    "statusTenant": "Tenant: {{tenant}}"
   }
 }
