@@ -104,11 +104,18 @@ fn rejection_hint(body: &str) -> Option<&'static str> {
 ///
 /// A no-op for accounts without an `xoauth2` block, so callers can invoke it
 /// unconditionally before connecting.
+///
+/// `force` exchanges the refresh token even when the locally recorded expiry
+/// still looks valid. Pass `true` after the server answered a command with
+/// "the access token expired": that answer contradicts the local record, and
+/// without the forced exchange the reconnect would present the same rejected
+/// token.
 pub(crate) async fn ensure_fresh_xoauth2(
     crypto: &CryptoService,
     store: &Store,
     account_id: &str,
     proxy: Option<HttpProxyConfig>,
+    force: bool,
 ) -> std::result::Result<(), PebbleError> {
     let Some(decrypted) = load_account_auth_data(crypto, store, account_id)? else {
         return Ok(());
@@ -122,7 +129,7 @@ pub(crate) async fn ensure_fresh_xoauth2(
     let mut creds: StoredXOAuth2 = serde_json::from_value(raw)
         .map_err(|e| PebbleError::Internal(format!("Failed to parse xoauth2 block: {e}")))?;
 
-    if !creds.needs_refresh() {
+    if !force && !creds.needs_refresh() {
         return Ok(());
     }
 
@@ -267,7 +274,9 @@ pub async fn set_xoauth2_refresh(
         .map_err(|e| PebbleError::Internal(format!("Failed to serialize auth data: {e}")))?;
     store_account_auth_data(&state.crypto, &state.store, &account_id, &bytes)?;
 
-    ensure_fresh_xoauth2(&state.crypto, &state.store, &account_id, None).await
+    // A token just minted by an interactive sign-in is exchanged unconditionally
+    // anyway: `expires_at: 0` already makes `needs_refresh()` true.
+    ensure_fresh_xoauth2(&state.crypto, &state.store, &account_id, None, false).await
 }
 
 /// Report how an account currently authenticates, so the XOAUTH2 wiring can be

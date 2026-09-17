@@ -53,6 +53,19 @@ impl ImapMailProvider {
         self.inner.connect().await
     }
 
+    /// Connect to the IMAP server, exchanging the refresh token for a new
+    /// access token first even if the recorded expiry says the current one is
+    /// still good. Used when the previous session was rejected for an expired
+    /// token, which is precisely when that record cannot be trusted.
+    pub async fn connect_with_fresh_token(&self) -> Result<()> {
+        self.inner.connect_with_fresh_token().await
+    }
+
+    /// See [`ImapProvider::connect_refreshing_expired_token`].
+    pub async fn connect_refreshing_expired_token(&self) -> Result<()> {
+        self.inner.connect_refreshing_expired_token().await
+    }
+
     /// Disconnect from the IMAP server.
     pub async fn disconnect(&self) -> Result<()> {
         self.inner.disconnect().await

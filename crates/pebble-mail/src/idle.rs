@@ -91,8 +91,10 @@ pub async fn check_for_changes_with_idle(
                 warn!("IDLE failed, attempting reconnect before fallback poll: {e}");
                 // The IDLE failure may have left the session as None (e.g.
                 // when done() fails to recover it). Reconnect so the
-                // fallback poll has a usable session.
-                if let Err(reconn_err) = provider.connect().await {
+                // fallback poll has a usable session — and if the failure was
+                // the server ending the session over an expired access token,
+                // come back with a freshly exchanged one.
+                if let Err(reconn_err) = provider.connect_refreshing_expired_token().await {
                     warn!("Reconnect after IDLE failure also failed: {reconn_err}");
                     return Ok(IdleEvent::Error(format!(
                         "IDLE failed and reconnect failed: {e}; {reconn_err}"

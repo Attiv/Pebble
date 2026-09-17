@@ -464,7 +464,17 @@ fn idle_check_recovery_user_error(
     None
 }
 
+/// Whether a failure is worth reconnecting for.
+///
+/// A session the server ended because the access token expired counts: the
+/// reconnect that follows is the only thing that asks for a new token. Without
+/// it the failure fell through to the catch-all arm, which reports the error
+/// and leaves the dead session in place.
 fn is_retryable_imap_connection_error(error: &PebbleError) -> bool {
+    if crate::imap::is_expired_access_token_error(error) {
+        return true;
+    }
+
     let PebbleError::Network(message) = error else {
         return false;
     };
@@ -1042,8 +1052,7 @@ impl SyncWorker {
                     "IMAP connection failed during initial sync for folder {} account {}; reconnecting before retry: {}",
                     folder.name, self.base.account_id, e
                 );
-                let _ = self.provider.disconnect().await;
-                self.provider.connect().await?;
+                self.reconnect_imap().await?;
                 self.initial_sync_folder_once(folder).await
             }
             Err(e) => Err(e),
@@ -1580,6 +1589,16 @@ impl SyncWorker {
         Ok(())
     }
 
+    /// Drop the dead session and reconnect.
+    ///
+    /// Goes through the provider's expiry-aware connect, so a session the
+    /// server ended because the access token expired comes back with a fresh
+    /// one rather than the token that was just rejected.
+    async fn reconnect_imap(&self) -> Result<()> {
+        let _ = self.provider.disconnect().await;
+        self.provider.connect_refreshing_expired_token().await
+    }
+
     async fn poll_imap_folder_with_reconnect(
         &self,
         folder: &pebble_core::Folder,
@@ -1598,8 +1617,7 @@ impl SyncWorker {
                     "IMAP connection failed while polling folder {} account {}; reconnecting before retry: {}",
                     folder.name, self.base.account_id, e
                 );
-                let _ = self.provider.disconnect().await;
-                match self.provider.connect().await {
+                match self.reconnect_imap().await {
                     Ok(()) => {
                         if let Err(retry_error) = self.poll_imap_folder_once(folder).await {
                             warn!(
@@ -1700,8 +1718,7 @@ impl SyncWorker {
                     "IMAP connection failed while reconciling folder {} account {}; reconnecting before retry: {}",
                     folder.name, self.base.account_id, e
                 );
-                let _ = self.provider.disconnect().await;
-                self.provider.connect().await?;
+                self.reconnect_imap().await?;
                 self.reconcile_folder_once(folder).await
             }
             Err(e) => Err(e),
@@ -1888,7 +1905,7 @@ impl SyncWorker {
                 }
 
                 if !connected {
-                    match idle_provider.connect().await {
+                    match idle_provider.connect_refreshing_expired_token().await {
                         Ok(()) => {
                             connected = true;
                             backoff.record_success();
@@ -1965,7 +1982,7 @@ impl SyncWorker {
         trigger_rx: Option<mpsc::UnboundedReceiver<SyncTrigger>>,
     ) {
         // Connect and do initial sync
-        if let Err(e) = self.provider.connect().await {
+        if let Err(e) = self.provider.connect_refreshing_expired_token().await {
             error!(
                 "Failed to connect for account {}: {}",
                 self.base.account_id, e
@@ -2140,7 +2157,8 @@ impl SyncWorker {
                             Ok(crate::idle::IdleEvent::Error(e)) => {
                                 warn!("IDLE check error for account {}: {}", self.base.account_id, e);
                                 let _ = self.provider.disconnect().await;
-                                let recovery_error = match self.provider.connect().await {
+                                let recovery_error =
+                                    match self.provider.connect_refreshing_expired_token().await {
                                     Ok(()) => match self.poll_new_messages().await {
                                         Ok(()) => {
                                             polling_baseline_trusted = self
@@ -3011,6 +3029,47 @@ mod tests {
         );
 
         assert!(!is_retryable_imap_connection_error(&error));
+    }
+
+    #[test]
+    fn imap_expired_access_token_is_retryable_for_polling() {
+        // Verbatim from the log. Microsoft ends the session this way when the
+        // access token it was opened with runs out, and every command on that
+        // session fails the same way afterwards. The failure has to reach the
+        // reconnect path, or the dead session is reported and kept.
+        let error = pebble_core::PebbleError::Network(
+            "SELECT failed: io: status: Bye, code: None, information: Some(\"Session invalidated - AccessTokenExpired\")"
+                .to_string(),
+        );
+
+        assert!(is_retryable_imap_connection_error(&error));
+    }
+
+    #[test]
+    fn expired_access_token_verdict_is_matched_in_free_text() {
+        // The IDLE paths carry the reason as text rather than as a typed error.
+        assert!(crate::imap::text_reports_expired_access_token(
+            "IDLE failed and reconnect failed: Network error: SELECT failed: status: Bye, \
+             information: Some(\"Session invalidated - AccessTokenExpired\")"
+        ));
+        assert!(crate::imap::text_reports_expired_access_token(
+            "status: Bye ... Session invalidated - Access token expired"
+        ));
+        assert!(!crate::imap::text_reports_expired_access_token(
+            "SELECT failed: no response: code: None, info: Some(\"SELECT Folder not exist\")"
+        ));
+    }
+
+    #[test]
+    fn only_network_errors_carry_the_expired_access_token_verdict() {
+        // A rejected token exchange is an Auth error and has its own handling;
+        // treating its text as a session expiry would send it to the reconnect
+        // path instead of the user.
+        let rejected = pebble_core::PebbleError::Auth(
+            "XOAUTH2 refresh rejected (400): Session invalidated - AccessTokenExpired".to_string(),
+        );
+
+        assert!(!crate::imap::is_expired_access_token_error(&rejected));
     }
 
     #[test]

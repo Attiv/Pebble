@@ -14,7 +14,7 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio_native_tls as async_native_tls;
 use tokio_rustls::client::TlsStream;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use rustls::{
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
@@ -498,8 +498,36 @@ pub struct ImapMailboxStatus {
 /// A sync worker can stay connected for longer than an access token lives, so
 /// the token captured when the worker started is stale by the time it
 /// reconnects. Providers call this before every connect to get a current one.
+///
+/// The boolean forces the exchange. Without it the refresher trusts the locally
+/// recorded expiry, which is the one record a server-side "your token expired"
+/// answer has just contradicted.
 pub type AccessTokenRefresher =
-    Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Result<String>> + Send>> + Send + Sync>;
+    Arc<dyn Fn(bool) -> Pin<Box<dyn Future<Output = Result<String>> + Send>> + Send + Sync>;
+
+/// Whether a message says the server ended the session because the access
+/// token behind it expired.
+///
+/// Microsoft's IMAP answers `BYE ... Session invalidated - AccessTokenExpired`
+/// when the token a session was opened with runs out, and from then on every
+/// command on that session fails the same way. The wording reaches callers as
+/// text (through `PebbleError`'s `Display`, or an `IdleEvent`), so the match is
+/// on the text.
+pub(crate) fn text_reports_expired_access_token(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("accesstokenexpired") || lower.contains("access token expired")
+}
+
+/// [`text_reports_expired_access_token`] for a typed error.
+///
+/// Only `Network` errors count: a rejection from the token endpoint is an
+/// `Auth` error and has its own handling.
+pub(crate) fn is_expired_access_token_error(error: &PebbleError) -> bool {
+    match error {
+        PebbleError::Network(message) => text_reports_expired_access_token(message),
+        _ => false,
+    }
+}
 
 pub struct ImapProvider {
     config: ImapConfig,
@@ -685,11 +713,16 @@ impl ImapProvider {
     }
 
     /// Ask the refresher for a current access token, if one is attached.
-    async fn refresh_access_token(&self) -> Result<()> {
+    ///
+    /// `force` skips the refresher's own expiry check. Set it when the session
+    /// failed because the server rejected the token: our local record of when it
+    /// expires is then known to be wrong, and reconnecting with the same token
+    /// would just fail the same way.
+    async fn refresh_access_token(&self, force: bool) -> Result<()> {
         let Some(refresher) = self.token_refresher.as_ref() else {
             return Ok(());
         };
-        let token = refresher().await?;
+        let token = refresher(force).await?;
         *self.access_token.lock().await = Some(token);
         Ok(())
     }
@@ -927,7 +960,40 @@ impl ImapProvider {
 
     /// Connect to the IMAP server and log in.
     pub async fn connect(&self) -> Result<()> {
-        self.refresh_access_token().await?;
+        self.connect_with(false).await
+    }
+
+    /// Connect and log in, exchanging the refresh token for a new access token
+    /// first even if the recorded expiry says the current one is still good.
+    ///
+    /// For a session that just died of an expired access token, the recorded
+    /// expiry is the thing that was wrong.
+    pub async fn connect_with_fresh_token(&self) -> Result<()> {
+        self.connect_with(true).await
+    }
+
+    /// Connect, and if the server itself says the session's access token has
+    /// expired, exchange the refresh token and try once more.
+    ///
+    /// Every reconnect that does not already know why the last session died
+    /// goes through here. A plain [`Self::connect`] would hand the server the
+    /// same token it just rejected, because the locally recorded expiry it
+    /// consults is the one record an "expired" verdict has just contradicted.
+    pub async fn connect_refreshing_expired_token(&self) -> Result<()> {
+        match self.connect().await {
+            Ok(()) => Ok(()),
+            Err(e) if is_expired_access_token_error(&e) => {
+                warn!(
+                    "IMAP session was rejected for an expired access token; exchanging the refresh token before retrying: {e}"
+                );
+                self.connect_with_fresh_token().await
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn connect_with(&self, force_refresh: bool) -> Result<()> {
+        self.refresh_access_token(force_refresh).await?;
         let auth_config = self.auth_config().await;
         let tcp = self.tcp_connect().await?;
 

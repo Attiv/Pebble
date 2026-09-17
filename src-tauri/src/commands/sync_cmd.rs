@@ -182,6 +182,7 @@ async fn start_sync_inner(
         &state.store,
         &account_id,
         None,
+        false,
     )
     .await
     {
@@ -641,23 +642,28 @@ fn build_sync_task(
             let refresher_crypto = Arc::clone(&state.crypto);
             let refresher_store = Arc::clone(&state.store);
             let refresher_account = account_id_clone.clone();
-            let token_refresher: pebble_mail::AccessTokenRefresher = Arc::new(move || {
-                let crypto = Arc::clone(&refresher_crypto);
-                let store = Arc::clone(&refresher_store);
-                let account_id = refresher_account.clone();
-                Box::pin(async move {
-                    crate::commands::xoauth2::ensure_fresh_xoauth2(
-                        &crypto,
-                        &store,
-                        &account_id,
-                        None,
-                    )
-                    .await?;
-                    let config =
-                        crate::commands::messages::load_imap_config(&store, &crypto, &account_id)?;
-                    Ok(config.password)
-                })
-            });
+            let token_refresher: pebble_mail::AccessTokenRefresher =
+                Arc::new(move |force: bool| {
+                    let crypto = Arc::clone(&refresher_crypto);
+                    let store = Arc::clone(&refresher_store);
+                    let account_id = refresher_account.clone();
+                    Box::pin(async move {
+                        crate::commands::xoauth2::ensure_fresh_xoauth2(
+                            &crypto,
+                            &store,
+                            &account_id,
+                            None,
+                            force,
+                        )
+                        .await?;
+                        let config = crate::commands::messages::load_imap_config(
+                            &store,
+                            &crypto,
+                            &account_id,
+                        )?;
+                        Ok(config.password)
+                    })
+                });
             let provider =
                 Arc::new(ImapMailProvider::new(imap_config).with_token_refresher(token_refresher));
             tokio::spawn(async move {
