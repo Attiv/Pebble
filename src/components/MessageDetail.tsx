@@ -17,7 +17,8 @@ import { useMessageLoader } from "@/hooks/useMessageLoader";
 import { useBilingualTranslation } from "@/hooks/useBilingualTranslation";
 import type { BilingualError } from "@/hooks/useBilingualTranslation";
 import { defaultPrivacyMode } from "@/lib/privacyMode";
-import { getMessageTheme, messageThemeVariables, senderInitials } from "@/lib/messageThemes";
+import { getMessageTheme, messageThemeVariables, resolveMessageTheme, senderInitials } from "@/lib/messageThemes";
+import { useResolvedAppTheme } from "@/hooks/useResolvedAppTheme";
 import { useKanbanStore } from "@/stores/kanban.store";
 import { useToastStore } from "@/stores/toast.store";
 import { useUIStore } from "@/stores/ui.store";
@@ -61,7 +62,10 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
   // switching it in one message carries over to the next one.
   const messageThemeId = useUIStore((s) => s.messageTheme);
   const setMessageTheme = useUIStore((s) => s.setMessageTheme);
-  const theme = getMessageTheme(messageThemeId);
+  // A fixed palette cannot follow `[data-theme]` by itself, so the app's mode is
+  // read as a value and the template is resolved before anything consumes it.
+  const isDarkApp = useResolvedAppTheme() === "dark";
+  const theme = resolveMessageTheme(getMessageTheme(messageThemeId), isDarkApp);
   const [privacyOverride, setPrivacyOverride] = useState<{
     messageId: string;
     mode: PrivacyMode;

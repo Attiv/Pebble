@@ -1,7 +1,19 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import MessageThemePicker from "@/components/MessageThemePicker";
 import { MESSAGE_THEMES } from "@/lib/messageThemes";
+import { useUIStore } from "@/stores/ui.store";
+
+/** Every thumbnail's inline style, keyed by template id. */
+function thumbnails(): Map<string, string> {
+  return new Map(
+    MESSAGE_THEMES.map((theme) => {
+      const option = document.querySelector(`[data-message-theme-option="${theme.id}"]`);
+      const thumbnail = option?.querySelector('[aria-hidden="true"]');
+      return [theme.id, thumbnail?.getAttribute("style") ?? ""] as const;
+    }),
+  );
+}
 
 vi.mock("react-i18next", () => ({
   initReactI18next: {
@@ -14,6 +26,10 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("MessageThemePicker", () => {
+  beforeEach(() => {
+    useUIStore.setState({ theme: "light" });
+  });
+
   it("offers every registered template", () => {
     render(<MessageThemePicker activeTheme="claude" onSelect={vi.fn()} />);
 
@@ -70,6 +86,45 @@ describe("MessageThemePicker", () => {
         expect(css).not.toMatch(/background:\s*var\(--color-/);
       }
     }
+  });
+
+  it("repaints only the templates that carry a night palette once the app is dark", () => {
+    const day = render(<MessageThemePicker activeTheme="card" onSelect={vi.fn()} />);
+    const byDay = thumbnails();
+    day.unmount();
+
+    useUIStore.setState({ theme: "dark" });
+    render(<MessageThemePicker activeTheme="card" onSelect={vi.fn()} />);
+    const byNight = thumbnails();
+
+    for (const theme of MESSAGE_THEMES) {
+      const moved = byNight.get(theme.id) !== byDay.get(theme.id);
+      // The thumbnail promises the pane the template will really paint, so it
+      // moves exactly when the template does: a night palette means a new
+      // thumbnail, and an adaptive or already-dark template means the same one.
+      expect(moved, theme.id).toBe(Boolean(theme.dark));
+    }
+  });
+
+  it("draws a brand thumbnail on the night page, not the day one", () => {
+    useUIStore.setState({ theme: "dark" });
+    render(<MessageThemePicker activeTheme="wechat" onSelect={vi.fn()} />);
+
+    const night = MESSAGE_THEMES.find((theme) => theme.id === "wechat")?.dark;
+    expect(night).toBeDefined();
+
+    // Read through the CSSOM on both sides: whatever jsdom does to a literal
+    // colour it does to the probe the same way, so this cannot drift apart from
+    // the rendering by a formatting detail.
+    const probe = document.createElement("div");
+    probe.style.background = night?.preview.page ?? "";
+    const painted = probe.style.background;
+
+    const thumbnail = document.querySelector<HTMLElement>(
+      '[data-message-theme-option="wechat"] [aria-hidden="true"]',
+    );
+    expect(painted).toMatch(/^rgb\(/);
+    expect(thumbnail?.style.background).toBe(painted);
   });
 
   it("marks exactly the active template as checked", () => {

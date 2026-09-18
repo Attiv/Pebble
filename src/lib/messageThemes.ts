@@ -36,24 +36,30 @@ import type { CSSProperties } from "react";
  *    dark rail beside a message on its own white sheet.
  *
  * **Brand skins** — modelled on a reading surface people already know, because a
- * familiar shape is faster to navigate than a novel one. All four own their
+ * familiar shape is faster to navigate than a novel one. All five own their
  * colours (`paletteMode: "fixed"`): a brand skin that followed the app's
- * light/dark tokens would stop being that brand. They are safe in either app
- * theme because every one of them is a light palette with light surfaces, so
- * mail text is dark-on-light either way.
+ * light/dark tokens would stop being that brand.
+ *
+ * Following the tokens and answering dark mode are two different things, though.
+ * A brand answers with *its own* night palette — WeChat's night is not the app's
+ * night — so each fixed template carries an optional `dark` block and
+ * {@link resolveMessageTheme} swaps it in. It has to be done in JS: a fixed
+ * palette publishes literals, so `[data-theme="dark"]` has nothing to override,
+ * which means the mode is read as a value and the template resolved before any
+ * consumer touches it.
  *
  * 5. **Claude** — ivory page, centred narrow column, serif subject, muted
  *    terracotta. Roomy and low-chrome; the calmest of the four.
  * 6. **WeChat** — flat grey page, square white cards with no shadow, the largest
  *    body type, WeChat green for actions and its slate blue for links.
- * 7. **Telegram** — two columns, with the sender, the actions and the
- *    attachments in a white rail beside the message; Telegram's blue throughout.
+ * 7. **Telegram** — a full-width white header band over a single column, the
+ *    actions under the message, Telegram's blue throughout.
  * 8. **iMessage** — iOS system grey behind very round white cards, a neutral
  *    monogram, iOS blue for links.
  *
  * A brand skin may share an arrangement with a neutral one — WeChat is Mailbox
- * in different clothes, Telegram is Console — and that is the point: what a
- * test forbids is a theme that differs from an existing one by palette alone.
+ * in different clothes — and that is the point: what a test forbids is a theme
+ * that differs from an existing one by palette alone.
  */
 
 export type MessageThemeId =
@@ -109,6 +115,44 @@ export interface MessageThemeType {
   body: { fontFamily: string; size: string; weight: number; leading: number; color: string; linkColor: string };
 }
 
+/**
+ * The colours a `"fixed"` template paints with once the app is in dark mode.
+ *
+ * Only the fields that can differ are here: a night palette changes colours,
+ * never geometry, so radii, paddings, sizes and the type scale stay exactly
+ * where the light theme put them.
+ *
+ * Every colour a theme can paint is required, though. A half-filled night
+ * palette would fall back to a light literal in one corner and leave it
+ * unreadable — the failure is invisible in a type-check and easy to miss by eye,
+ * so the shape is what rules it out.
+ */
+export interface MessageThemeDarkPalette {
+  accent: string;
+  divider: string;
+  pageBackground: string;
+  headerBackground: string;
+  headerBorder: string;
+  headerCardBackground: string;
+  headerCardBorder: string;
+  headerCardShadow: string;
+  surfaceBackground: string;
+  surfaceBorder: string;
+  surfaceShadow: string;
+  avatarBackground: string;
+  avatarColor: string;
+  titleColor: string;
+  senderColor: string;
+  metaColor: string;
+  labelColor: string;
+  bodyColor: string;
+  linkColor: string;
+  /** The sheet the sanitized mail itself is parked on. */
+  sheet: { lightSheet: boolean; background: string; textColor: string };
+  /** Colour chips + layout hint drawn in the picker while the app is dark. */
+  preview: MessageTheme["preview"];
+}
+
 export interface MessageTheme {
   id: MessageThemeId;
   labelKey: string;
@@ -157,6 +201,12 @@ export interface MessageTheme {
     sheetBackground: string;
     sheetTextColor: string;
   };
+  /**
+   * The night palette, for a `"fixed"` template. Absent on `"adaptive"` ones —
+   * they follow the app's tokens and need no second palette — and on a fixed
+   * template with no dark form, which then just keeps its light one.
+   */
+  dark?: MessageThemeDarkPalette;
 }
 
 const SYSTEM_SANS =
@@ -388,6 +438,30 @@ const letter: MessageTheme = {
     },
   },
   body: { lightSheet: false, sheetBackground: "transparent", sheetTextColor: "#3b3229" },
+  // The desk goes dark; the paper is the template, so it does not.
+  dark: {
+    accent: "#d08a5a",
+    divider: "1px solid #3a322a",
+    pageBackground: "#1b1815",
+    headerBackground: "transparent",
+    headerBorder: "none",
+    headerCardBackground: "transparent",
+    headerCardBorder: "none",
+    headerCardShadow: "none",
+    surfaceBackground: "#fffdf8",
+    surfaceBorder: "1px solid #3a322a",
+    surfaceShadow: "0 1px 2px rgba(0, 0, 0, 0.5)",
+    avatarBackground: "#2f2a23",
+    avatarColor: "#d08a5a",
+    titleColor: "#ece5d8",
+    senderColor: "#dcd3c3",
+    metaColor: "#b3a692",
+    labelColor: "#a4977f",
+    bodyColor: "#3b3229",
+    linkColor: "#a2603a",
+    sheet: { lightSheet: false, background: "transparent", textColor: "#3b3229" },
+    preview: { page: "#1b1815", card: "#fffdf8", title: "#ece5d8", text: "#b3a692", accent: "#d08a5a" },
+  },
 };
 
 /**
@@ -538,6 +612,30 @@ const claude: MessageTheme = {
     },
   },
   body: { lightSheet: false, sheetBackground: "transparent", sheetTextColor: "#33312b" },
+  // Ivory at night: the page it is written on stays ivory, the room goes dark.
+  dark: {
+    accent: "#e08b6e",
+    divider: "1px solid #3a3835",
+    pageBackground: "#1f1e1c",
+    headerBackground: "transparent",
+    headerBorder: "none",
+    headerCardBackground: "transparent",
+    headerCardBorder: "none",
+    headerCardShadow: "none",
+    surfaceBackground: "#fffdfa",
+    surfaceBorder: "1px solid #3a3835",
+    surfaceShadow: "0 1px 2px rgba(0, 0, 0, 0.5)",
+    avatarBackground: "#332f2b",
+    avatarColor: "#e08b6e",
+    titleColor: "#eee9e0",
+    senderColor: "#ded8cc",
+    metaColor: "#b0aa9f",
+    labelColor: "#a49e91",
+    bodyColor: "#33312b",
+    linkColor: "#bc5f3e",
+    sheet: { lightSheet: false, background: "transparent", textColor: "#33312b" },
+    preview: { page: "#1f1e1c", card: "#fffdfa", title: "#eee9e0", text: "#b0aa9f", accent: "#e08b6e" },
+  },
 };
 
 /**
@@ -612,6 +710,32 @@ const wechat: MessageTheme = {
     },
   },
   body: { lightSheet: false, sheetBackground: "transparent", sheetTextColor: "#191919" },
+  // WeChat's own night: dark grey page, dark cards, and the green left alone.
+  dark: {
+    accent: "#07c160",
+    divider: "1px solid #2b2b2b",
+    pageBackground: "#111111",
+    headerBackground: "#1e1e1e",
+    headerBorder: "1px solid #2b2b2b",
+    headerCardBackground: "transparent",
+    headerCardBorder: "none",
+    headerCardShadow: "none",
+    surfaceBackground: "#2c2c2c",
+    surfaceBorder: "none",
+    surfaceShadow: "none",
+    avatarBackground: "#333333",
+    // WeChat's slate blue, lifted for night: the day palette's own value lands
+    // at 3.87 on this chip, under the 4.27 it manages by day.
+    avatarColor: "#8fa5be",
+    titleColor: "#e8e8e8",
+    senderColor: "#8fa5be",
+    metaColor: "#9a9a9a",
+    labelColor: "#8f8f8f",
+    bodyColor: "#e0e0e0",
+    linkColor: "#576b95",
+    sheet: { lightSheet: true, background: "#ffffff", textColor: "#191919" },
+    preview: { page: "#111111", card: "#2c2c2c", title: "#e8e8e8", text: "#9a9a9a", accent: "#07c160" },
+  },
 };
 
 /**
@@ -688,6 +812,31 @@ const telegram: MessageTheme = {
     },
   },
   body: { lightSheet: false, sheetBackground: "transparent", sheetTextColor: "#212121" },
+  // Telegram Desktop's night blue, which is why the rail and the card are two
+  // different greys rather than one.
+  dark: {
+    accent: "#5eb5f7",
+    divider: "1px solid #24303f",
+    pageBackground: "#0e1621",
+    headerBackground: "#17212b",
+    headerBorder: "1px solid #24303f",
+    headerCardBackground: "transparent",
+    headerCardBorder: "none",
+    headerCardShadow: "none",
+    surfaceBackground: "#182533",
+    surfaceBorder: "none",
+    surfaceShadow: "0 1px 2px rgba(0, 0, 0, 0.45)",
+    avatarBackground: "#22303f",
+    avatarColor: "#5eb5f7",
+    titleColor: "#e8eef5",
+    senderColor: "#5eb5f7",
+    metaColor: "#8a9aa8",
+    labelColor: "#7d8b98",
+    bodyColor: "#cfd8e3",
+    linkColor: "#3390ec",
+    sheet: { lightSheet: true, background: "#ffffff", textColor: "#212121" },
+    preview: { page: "#0e1621", card: "#182533", title: "#e8eef5", text: "#8a9aa8", accent: "#5eb5f7" },
+  },
 };
 
 /**
@@ -762,6 +911,30 @@ const imessage: MessageTheme = {
     },
   },
   body: { lightSheet: false, sheetBackground: "transparent", sheetTextColor: "#1c1c1e" },
+  // iOS system black and the secondary system grey, with the dark-mode blue.
+  dark: {
+    accent: "#0a84ff",
+    divider: "1px solid #2c2c2e",
+    pageBackground: "#000000",
+    headerBackground: "#1c1c1e",
+    headerBorder: "1px solid #2c2c2e",
+    headerCardBackground: "transparent",
+    headerCardBorder: "none",
+    headerCardShadow: "none",
+    surfaceBackground: "#1c1c1e",
+    surfaceBorder: "none",
+    surfaceShadow: "0 1px 2px rgba(0, 0, 0, 0.45)",
+    avatarBackground: "#2c2c2e",
+    avatarColor: "#8e8e93",
+    titleColor: "#ffffff",
+    senderColor: "#f2f2f7",
+    metaColor: "#8e8e93",
+    labelColor: "#8e8e93",
+    bodyColor: "#e5e5ea",
+    linkColor: "#007aff",
+    sheet: { lightSheet: true, background: "#ffffff", textColor: "#1c1c1e" },
+    preview: { page: "#000000", card: "#1c1c1e", title: "#ffffff", text: "#8e8e93", accent: "#0a84ff" },
+  },
 };
 
 export const MESSAGE_THEMES: readonly MessageTheme[] = [
@@ -788,6 +961,69 @@ export function getMessageTheme(id: string | null | undefined): MessageTheme {
     MESSAGE_THEMES.find((theme) => theme.id === DEFAULT_MESSAGE_THEME) ??
     claude
   );
+}
+
+/**
+ * The template as it should be drawn right now.
+ *
+ * `"adaptive"` templates and light mode both get the theme back untouched: the
+ * first switches itself through the app's own custom properties, and the second
+ * is already what the theme describes.
+ *
+ * A `"fixed"` template with a `dark` palette is the case that needs work.
+ * Nothing about it can switch in CSS — the colours it publishes are literals,
+ * so `[data-theme="dark"]` has no declaration to override — so the swap happens
+ * here, and the result is a complete {@link MessageTheme}. Every consumer
+ * (`messageThemeVariables`, `messageThemeContentCss`, the picker's thumbnails)
+ * keeps taking one theme and never has to know modes exist.
+ *
+ * `tone` deliberately survives the swap. It does not describe how bright the
+ * page is but how the *message* is typed: in every one of the brand night
+ * palettes the mail still lands on light paper — Letter and Claude keep their
+ * ivory sheet, and the three chat skins park sanitized mail on one — so the mail
+ * is dark-on-light and says so. Console, the one template whose mail really is
+ * light-on-dark, is `tone: "dark"` in both modes and never needs resolving.
+ */
+export function resolveMessageTheme(theme: MessageTheme, isDark: boolean): MessageTheme {
+  const dark = theme.dark;
+  if (!isDark || !dark) return theme;
+
+  return {
+    ...theme,
+    accent: dark.accent,
+    divider: dark.divider,
+    preview: dark.preview,
+    page: { ...theme.page, background: dark.pageBackground },
+    header: {
+      ...theme.header,
+      background: dark.headerBackground,
+      border: dark.headerBorder,
+      cardBackground: dark.headerCardBackground,
+      cardBorder: dark.headerCardBorder,
+      cardShadow: dark.headerCardShadow,
+    },
+    surface: {
+      ...theme.surface,
+      background: dark.surfaceBackground,
+      border: dark.surfaceBorder,
+      shadow: dark.surfaceShadow,
+    },
+    avatar: { ...theme.avatar, background: dark.avatarBackground, color: dark.avatarColor },
+    type: {
+      ...theme.type,
+      title: { ...theme.type.title, color: dark.titleColor },
+      sender: { ...theme.type.sender, color: dark.senderColor },
+      meta: { ...theme.type.meta, color: dark.metaColor },
+      label: { ...theme.type.label, color: dark.labelColor },
+      body: { ...theme.type.body, color: dark.bodyColor, linkColor: dark.linkColor },
+    },
+    body: {
+      ...theme.body,
+      lightSheet: dark.sheet.lightSheet,
+      sheetBackground: dark.sheet.background,
+      sheetTextColor: dark.sheet.textColor,
+    },
+  };
 }
 
 /** Read the persisted choice; anything unrecognised degrades to the default. */

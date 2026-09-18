@@ -126,6 +126,9 @@ const initialMessageTheme = readStoredMessageTheme(profileLocalStorage);
 /** Resolve "system" theme to an actual "dark" | "light" value. */
 export function resolveTheme(theme: Theme): "dark" | "light" {
   if (theme === "system") {
+    // No `matchMedia` outside a browser — a test environment or a worker. Light
+    // is the answer the app itself starts from.
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return "light";
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   }
   return theme;

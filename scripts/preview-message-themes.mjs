@@ -7,10 +7,14 @@
 // that ship in the app rather than a copy of them. The body is drawn in a
 // shadow root that receives messageThemeContentCss(theme), again as in the app.
 //
+// Both palettes are embedded for every template, because a fixed one carries a
+// `dark` variant that only the app's mode decides between: the page starts on
+// the light palette and `?appTheme=dark` re-renders each mock through
+// resolveMessageTheme(theme, true), exactly as MessageDetail does.
+//
 // Query params:
 //   ?only=<id>       render a single template, full width
-//   ?appTheme=dark   put the page on the app's dark tokens (`[data-theme=dark]`),
-//                    to check which templates adapt and which stay fixed
+//   ?appTheme=dark   resolve every template against a dark app
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -30,10 +34,11 @@ async function loadModule(sourcePath, name) {
   return import(pathToFileURL(modulePath).href);
 }
 
-const { MESSAGE_THEMES, messageThemeContentCss, messageThemeVariables } = await loadModule(
-  resolve(repo, "src/lib/messageThemes.ts"),
-  "messageThemes.compiled.mjs",
-);
+const { MESSAGE_THEMES, messageThemeContentCss, messageThemeVariables, resolveMessageTheme } =
+  await loadModule(
+    resolve(repo, "src/lib/messageThemes.ts"),
+    "messageThemes.compiled.mjs",
+  );
 
 // Tailwind's at-rules are resolved by Vite at build time and would fail here.
 const appCss = readFileSync(resolve(repo, "src/styles/index.css"), "utf8")
@@ -166,21 +171,48 @@ const attachmentsMarkup = (variant) => `
         </div>
       </div>`;
 
+/** The notes/controls that differ per theme family rather than per mode. */
+const CHROME_STYLE = [
+  "display:flex",
+  "flex-direction:column",
+  "height:560px",
+  "border-radius:10px",
+  "overflow:hidden",
+  "border:1px solid rgba(0,0,0,0.14)",
+  "box-shadow:0 8px 24px rgba(20,20,30,0.12)",
+].join(";");
+
+function modeRender(theme, isDark) {
+  const resolved = resolveMessageTheme(theme, isDark);
+  const { layout } = resolved;
+  return {
+    style: `${CHROME_STYLE};${varsToStyle(resolved)}`,
+    attributes: {
+      "data-msg-structure": layout.structure,
+      "data-msg-align": layout.align,
+      "data-msg-toolbar": layout.toolbar,
+      "data-msg-header-card": String(layout.headerCard),
+      "data-msg-avatar": String(layout.avatar),
+      "data-msg-full-bleed": String(layout.headerFullBleed),
+    },
+    meta: [
+      resolved.tone,
+      resolved.paletteMode,
+      `${layout.structure} / ${layout.align}`,
+      `toolbar ${layout.toolbar}`,
+      layout.contentWidth,
+      `body ${resolved.type.body.size}/${resolved.type.body.leading}`,
+      `page ${resolved.page.background}`,
+    ].join(" · "),
+    css: BASE_SHADOW_CSS + messageThemeContentCss(resolved),
+  };
+}
+
 const mocks = MESSAGE_THEMES.map((theme) => {
   const { layout } = theme;
   const inColumns = layout.structure === "columns";
   const orientation = layout.toolbar === "sidebar" ? "vertical" : "horizontal";
   const toolbar = toolbarMarkup(orientation);
-  const containerStyle = [
-    "display:flex",
-    "flex-direction:column",
-    "height:560px",
-    "border-radius:10px",
-    "overflow:hidden",
-    "border:1px solid rgba(0,0,0,0.14)",
-    "box-shadow:0 8px 24px rgba(20,20,30,0.12)",
-    varsToStyle(theme),
-  ].join(";");
 
   const aside = inColumns
     ? `
@@ -188,25 +220,20 @@ const mocks = MESSAGE_THEMES.map((theme) => {
     </aside>`
     : "";
 
+  const light = modeRender(theme, false);
+  const dark = modeRender(theme, true);
+
   return `
   <section class="mock" data-mock="${theme.id}">
     <header class="mock-label">
       <strong>${theme.id}</strong>
-      <span>
-        ${theme.tone} · ${theme.paletteMode} · ${layout.structure} / ${layout.align} · toolbar ${layout.toolbar}
-        · ${layout.contentWidth} · body ${theme.type.body.size}/${theme.type.body.leading}
-      </span>
+      <span class="mock-meta" data-meta-light="${light.meta}" data-meta-dark="${dark.meta}">${light.meta}</span>
     </header>
     <div
       class="message-detail-container"
       data-message-theme="${theme.id}"
-      data-msg-structure="${layout.structure}"
-      data-msg-align="${layout.align}"
-      data-msg-toolbar="${layout.toolbar}"
-      data-msg-header-card="${layout.headerCard}"
-      data-msg-avatar="${layout.avatar}"
-      data-msg-full-bleed="${layout.headerFullBleed}"
-      style="${containerStyle}"
+      ${Object.entries(light.attributes).map(([k, v]) => `${k}="${v}"`).join("\n      ")}
+      style="${light.style}"
     >
       <div class="message-detail-header">
         <div class="message-detail-header-inner">
@@ -228,8 +255,8 @@ const mocks = MESSAGE_THEMES.map((theme) => {
     <script type="application/json" class="mock-payload">${JSON.stringify({
       id: theme.id,
       surfaceId: `surface-${theme.id}`,
-      css: BASE_SHADOW_CSS + messageThemeContentCss(theme),
       html: EMAIL_HTML,
+      modes: { light, dark },
     })}</script>
   </section>`;
 }).join("\n");
@@ -255,7 +282,7 @@ const page = `<!doctype html>
     color: #1a1a1a;
   }
   h1 { font-size: 18px; margin: 0 0 4px; }
-  .page-note { font-size: 13px; color: #5c5c66; margin: 0 0 8px; max-width: 760px; line-height: 1.6; }
+  .page-note { font-size: 13px; color: #5c5c66; margin: 0 0 8px; max-width: 860px; line-height: 1.6; }
   .page-modes { font-size: 12px; color: #5c5c66; margin: 0 0 24px; }
   .page-modes a { color: #b25a3a; }
   .grid { display: grid; gap: 28px; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); align-items: start; }
@@ -278,8 +305,11 @@ const page = `<!doctype html>
     本页由 <code>src/lib/messageThemes.ts</code> 的真实主题注册表与
     <code>src/styles/index.css</code> 的真实布局规则渲染：同一份邮件 HTML，
     只有 <code>--msg-*</code> 变量、<code>data-msg-*</code> 结构标记与 shadow 内的正文排版不同。
-    前四套（card / mailbox / letter / console）跟随应用明暗令牌，其中 card、mailbox 是
-    <em>adaptive</em>；后四套品牌皮肤自带配色（<em>fixed</em>），看起来一样才是对的。
+    card / mailbox 是 <em>adaptive</em>（配色就是应用自己的 <code>--color-*</code>，所以两种模式自动跟着走）；
+    letter 与四套品牌皮肤是 <em>fixed</em>，各带一份自己的暗色变体（<code>dark</code>），
+    深色模式下通过 <code>resolveMessageTheme()</code> 换上——和 App 里走的是同一条路径。
+    邮件本身是浅色排版的，所以深色变体里「纸」仍是浅色：WeChat / Telegram / iMessage 用它自己官方夜色的深色卡片
+    托一张白纸，Letter / Claude 则保留那张纸、只把书桌和文字变暗。
   </p>
   <p class="page-modes">
     对照明暗模式：<a href="?appTheme=dark">全部 · 深色</a> ·
@@ -288,16 +318,31 @@ const page = `<!doctype html>
   <div class="grid">${mocks}
   </div>
   <script>
+    const params = new URLSearchParams(location.search);
+    const mode = params.get("appTheme") === "dark" ? "dark" : "light";
+
     for (const el of document.querySelectorAll(".mock-payload")) {
       const payload = JSON.parse(el.textContent);
+      const render = payload.modes[mode];
       const host = document.getElementById(payload.surfaceId);
+
+      // The container carries its palette as inline custom properties, so the
+      // mode switch is a re-write of those rather than a stylesheet rule.
+      const container = host.closest(".message-detail-container");
+      container.setAttribute("style", render.style);
+      for (const [name, value] of Object.entries(render.attributes)) {
+        container.setAttribute(name, value);
+      }
+      const meta = container.parentElement.querySelector(".mock-meta");
+      if (meta) meta.textContent = meta.dataset["meta" + mode[0].toUpperCase() + mode.slice(1)];
+
       host.setAttribute("data-pebble-message-theme", payload.id);
       const shadow = host.attachShadow({ mode: "open" });
       shadow.innerHTML =
-        "<style>" + payload.css + "</style>" +
+        "<style>" + render.css + "</style>" +
         '<div class="pebble-email-content">' + payload.html + "</div>";
     }
-    const params = new URLSearchParams(location.search);
+
     // ?only=<id> renders a single template for close inspection.
     const only = params.get("only");
     if (only) {
@@ -306,8 +351,7 @@ const page = `<!doctype html>
       }
       document.querySelector(".grid").style.gridTemplateColumns = "1fr";
     }
-    // ?appTheme=dark flips the app tokens under the templates.
-    if (params.get("appTheme") === "dark") {
+    if (mode === "dark") {
       document.documentElement.setAttribute("data-theme", "dark");
       document.body.style.background = "#111";
     }

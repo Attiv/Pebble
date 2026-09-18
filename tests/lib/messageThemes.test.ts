@@ -11,6 +11,7 @@ import {
   messageThemePreviewPalette,
   messageThemeVariables,
   readStoredMessageTheme,
+  resolveMessageTheme,
   senderInitials,
   type MessageTheme,
 } from "@/lib/messageThemes";
@@ -267,6 +268,214 @@ describe("message theme preview palette", () => {
     const mailbox = getMessageTheme("mailbox");
     expect(mailbox.surface.background).toBe("transparent");
     expect(messageThemePreviewPalette(mailbox).card).toBe(mailbox.page.background);
+  });
+});
+
+/**
+ * WCAG relative luminance and contrast ratio. The night palettes are *chosen*
+ * by this number, so the test that guards them has to be able to compute it.
+ */
+function relativeLuminance(hex: string): number {
+  const channel = (value: number) => (value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+  const [r, g, b] = [1, 3, 5].map((i) => channel(Number.parseInt(hex.slice(i, i + 2), 16) / 255));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrastRatio(foreground: string, background: string): number {
+  const [lighter, darker] = [relativeLuminance(foreground), relativeLuminance(background)].sort(
+    (a, b) => b - a,
+  );
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+/**
+ * Every place a template paints text, as `[label, text, background]`.
+ *
+ * Backgrounds are resolved the way the stylesheet resolves them rather than the
+ * way the theme declares them: the header falls back to the page when it draws
+ * no band of its own, and mail parked on a sheet is read against the sheet.
+ * Plain text is a separate path — it paints the body colour straight onto the
+ * surface — so that pair is in here too.
+ */
+function textPairs(theme: MessageTheme): [string, string, string][] {
+  const header =
+    theme.header.background === "transparent" ? theme.page.background : theme.header.background;
+  const mail = theme.body.lightSheet ? theme.body.sheetBackground : theme.surface.background;
+  const pairs: [string, string, string][] = [
+    ["title", theme.type.title.color, header],
+    ["sender", theme.type.sender.color, header],
+    ["meta", theme.type.meta.color, header],
+    ["monogram", theme.avatar.color, theme.avatar.background],
+    ["body", theme.type.body.color, theme.surface.background],
+    ["link", theme.type.body.linkColor, mail],
+  ];
+  if (theme.body.lightSheet) {
+    pairs.push(["sheet", theme.body.sheetTextColor, theme.body.sheetBackground]);
+  }
+  return pairs;
+}
+
+describe("message theme dark variants", () => {
+  it("gives every brand skin a night palette, and asks nothing of the others", () => {
+    for (const theme of MESSAGE_THEMES) {
+      // Console is the one template that is already dark — there is nothing for
+      // it to switch to. An adaptive template needs none either: it publishes
+      // the app's own properties, which have already flipped.
+      const expected = theme.paletteMode === "fixed" && theme.id !== "console";
+      expect(Boolean(theme.dark), theme.id).toBe(expected);
+    }
+  });
+
+  it("fills in every colour a night palette can paint", () => {
+    for (const theme of MESSAGE_THEMES) {
+      const dark = theme.dark;
+      if (!dark) continue;
+
+      for (const [field, value] of Object.entries(dark)) {
+        if (field === "sheet") {
+          expect(dark.sheet.background.trim(), `${theme.id}.dark.sheet.background`).not.toBe("");
+          expect(dark.sheet.textColor.trim(), `${theme.id}.dark.sheet.textColor`).not.toBe("");
+          continue;
+        }
+        if (field === "preview") {
+          for (const [chip, chipValue] of Object.entries(dark.preview)) {
+            expect(chipValue.trim(), `${theme.id}.dark.preview.${chip}`).not.toBe("");
+          }
+          continue;
+        }
+        expect(typeof value, `${theme.id}.dark.${field}`).toBe("string");
+        expect(String(value).trim(), `${theme.id}.dark.${field}`).not.toBe("");
+      }
+
+      // A night palette is a literal by definition. One `var(--color-*)` in
+      // here would drag the app's dark tokens into a brand that exists to have
+      // its own, and would be the one field the mode swap cannot reach.
+      const literals = Object.entries(dark).flatMap(([field, value]) => {
+        if (field === "sheet") return Object.entries(dark.sheet).map(([k, v]) => [`sheet.${k}`, v] as const);
+        if (field === "preview") return Object.entries(dark.preview).map(([k, v]) => [`preview.${k}`, v] as const);
+        return [[field, value]] as const;
+      });
+      for (const [field, value] of literals) {
+        expect(String(value), `${theme.id}.dark.${field}`).not.toContain("var(");
+      }
+    }
+  });
+
+  it("hands the light template back untouched until the app is really dark", () => {
+    for (const theme of MESSAGE_THEMES) {
+      expect(resolveMessageTheme(theme, false)).toBe(theme);
+      if (theme.paletteMode === "adaptive") {
+        // The same object, not a copy: an adaptive template switches itself and
+        // a night palette would freeze its tokens back into literals.
+        expect(resolveMessageTheme(theme, true)).toBe(theme);
+      }
+    }
+  });
+
+  it("swaps the night palette in without touching the geometry it rides on", () => {
+    for (const theme of MESSAGE_THEMES) {
+      const dark = theme.dark;
+      if (!dark) continue;
+      const night = resolveMessageTheme(theme, true);
+
+      expect(night.id).toBe(theme.id);
+      expect(night.paletteMode).toBe("fixed");
+      expect(night.page.background).toBe(dark.pageBackground);
+      expect(night.header.background).toBe(dark.headerBackground);
+      expect(night.surface.background).toBe(dark.surfaceBackground);
+      expect(night.avatar.color).toBe(dark.avatarColor);
+      expect(night.type.title.color).toBe(dark.titleColor);
+      expect(night.type.body.linkColor).toBe(dark.linkColor);
+      expect(night.body.sheetBackground).toBe(dark.sheet.background);
+      expect(night.preview).toEqual(dark.preview);
+
+      // A night palette is colours only: radii, padding, sizes and the layout
+      // are the same object in both modes.
+      expect(night.layout).toBe(theme.layout);
+      expect(night.surface.padding).toBe(theme.surface.padding);
+      expect(night.surface.radius).toBe(theme.surface.radius);
+      expect(night.avatar.size).toBe(theme.avatar.size);
+      expect(night.type.body.size).toBe(theme.type.body.size);
+      expect(night.type.title.size).toBe(theme.type.title.size);
+    }
+  });
+
+  it("clears a readable floor in every night palette", () => {
+    // Normal-size text wants 4.5:1; secondary text, the monogram and links are
+    // allowed the large-text floor of 3:1. Claude's link is 4.27 and Telegram's
+    // 3.31 in *both* modes — the mail sits on the same white sheet either way,
+    // so that is the day palette's number, not a night one.
+    const floors: Record<string, number> = {
+      title: 4.5,
+      sender: 4.5,
+      body: 4.5,
+      sheet: 4.5,
+      meta: 3,
+      monogram: 3,
+      link: 3,
+    };
+
+    for (const theme of MESSAGE_THEMES) {
+      if (!theme.dark) continue;
+      for (const [label, text, background] of textPairs(resolveMessageTheme(theme, true))) {
+        expect(contrastRatio(text, background), `${theme.id} ${label}`).toBeGreaterThanOrEqual(
+          floors[label],
+        );
+      }
+    }
+  });
+
+  it("trades a little chrome contrast for night, never a quarter of it", () => {
+    // Only the pairs whose *background* is repainted are compared. The mail
+    // pairs are not: their surface stays light in both modes and only the ink
+    // inverts, so the day ratio is not a target there — WeChat's body drops
+    // 17.58 → 10.58 simply by becoming light-on-dark, and is better for it.
+    const repainted = new Set(["title", "sender", "meta", "monogram"]);
+
+    for (const theme of MESSAGE_THEMES) {
+      if (!theme.dark) continue;
+      const day = textPairs(theme).filter(([label]) => repainted.has(label));
+      const night = new Map(
+        textPairs(resolveMessageTheme(theme, true)).map(([label, text, background]) => [
+          label,
+          [text, background] as const,
+        ]),
+      );
+
+      for (const [label, dayText, dayBackground] of day) {
+        const [nightText, nightBackground] = night.get(label)!;
+        const dayRatio = contrastRatio(dayText, dayBackground);
+        const nightRatio = contrastRatio(nightText, nightBackground);
+        // Darkening a page costs some of the margin — Claude's sender drops
+        // 12.96 → 11.74 — but a palette that halves it is a mistake, not a mood.
+        expect(nightRatio, `${theme.id} ${label}`).toBeGreaterThan(dayRatio * 0.75);
+      }
+    }
+  });
+
+  it("keeps mail dark-on-light in every night palette", () => {
+    for (const theme of MESSAGE_THEMES) {
+      if (!theme.dark) continue;
+      const night = resolveMessageTheme(theme, true);
+
+      if (night.body.lightSheet) {
+        // Mail is parked on a sheet of its own, so the sheet is the light one.
+        expect(relativeLuminance(night.body.sheetBackground), `${theme.id} sheet`).toBeGreaterThan(0.5);
+        expect(relativeLuminance(night.body.sheetTextColor), `${theme.id} sheet text`).toBeLessThan(0.5);
+      } else {
+        // Otherwise mail sits on the card, so the card stays light — which is
+        // why Letter's and Claude's paper does not go dark with the desk.
+        expect(relativeLuminance(night.surface.background), `${theme.id} card`).toBeGreaterThan(0.5);
+        expect(relativeLuminance(night.type.body.color), `${theme.id} body`).toBeLessThan(0.5);
+      }
+
+      // The plain-text path paints the body colour straight onto the surface,
+      // sheets or not, so this pair has to hold in every night palette.
+      expect(
+        contrastRatio(night.type.body.color, night.surface.background),
+        `${theme.id} plain text`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
   });
 });
 

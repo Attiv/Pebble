@@ -4,9 +4,11 @@ import { Check } from "lucide-react";
 import {
   MESSAGE_THEMES,
   messageThemePreviewPalette,
+  resolveMessageTheme,
   type MessageTheme,
   type MessageThemeId,
 } from "@/lib/messageThemes";
+import { useResolvedAppTheme } from "@/hooks/useResolvedAppTheme";
 
 interface Props {
   activeTheme: MessageThemeId;
@@ -262,6 +264,10 @@ export function MessageThemeOption({
   onSelect: (theme: MessageThemeId) => void;
 }) {
   const { t } = useTranslation();
+  // The thumbnail promises what the template will look like, so it is drawn in
+  // the mode the app is in. Resolving here rather than at each call site means a
+  // third caller cannot forget it — the picker and the settings list both get it.
+  const resolved = resolveMessageTheme(theme, useResolvedAppTheme() === "dark");
 
   return (
     <button
@@ -284,7 +290,7 @@ export function MessageThemeOption({
         color: "var(--color-text-primary)",
       }}
     >
-      <MessageThemePreview theme={theme} />
+      <MessageThemePreview theme={resolved} />
       <span style={{ minWidth: 0, flex: 1 }}>
         <span style={{ display: "block", fontSize: "13px", fontWeight: 600 }}>
           {t(theme.labelKey, theme.id)}

@@ -115,7 +115,7 @@ function header(): HTMLElement {
 describe("MessageDetail themes", () => {
   beforeEach(() => {
     localStorage.clear();
-    useUIStore.setState({ messageTheme: "card" });
+    useUIStore.setState({ messageTheme: "card", theme: "light" });
   });
 
   it("renders on the default template and publishes its layout", () => {
@@ -172,6 +172,42 @@ describe("MessageDetail themes", () => {
     // The accent is the action colour; links keep WeChat's slate blue.
     expect(container().style.getPropertyValue("--msg-link-color")).toBe("#576b95");
     expect(localStorage.getItem(MESSAGE_THEME_STORAGE_KEY)).toBe("wechat");
+  });
+
+  it("draws a brand skin in its own night colours once the app is dark", () => {
+    useUIStore.setState({ messageTheme: "wechat", theme: "light" });
+    const day = renderDetail();
+    expect(container().style.getPropertyValue("--msg-page-background")).toBe(
+      getMessageTheme("wechat").page.background,
+    );
+    day.unmount();
+
+    useUIStore.setState({ theme: "dark" });
+    renderDetail();
+
+    const night = getMessageTheme("wechat").dark;
+    expect(night).toBeDefined();
+    expect(container().getAttribute("data-message-theme")).toBe("wechat");
+    expect(container().style.getPropertyValue("--msg-page-background")).toBe(night?.pageBackground);
+    expect(container().style.getPropertyValue("--msg-surface-background")).toBe(
+      night?.surfaceBackground,
+    );
+    expect(container().style.getPropertyValue("--msg-title-color")).toBe(night?.titleColor);
+    // The brand's action colour is the brand's in either mode.
+    expect(container().style.getPropertyValue("--msg-accent")).toBe("#07c160");
+  });
+
+  it("leaves an adaptive template to switch itself when the app is dark", () => {
+    useUIStore.setState({ messageTheme: "card", theme: "dark" });
+    renderDetail();
+
+    // Nothing is swapped here: Card publishes the app's tokens, which have
+    // already flipped, and it carries no night palette to swap in.
+    expect(getMessageTheme("card").dark).toBeUndefined();
+    expect(container().style.getPropertyValue("--msg-page-background")).toBe(
+      getMessageTheme("card").page.background,
+    );
+    expect(container().style.getPropertyValue("--msg-page-background")).toContain("var(--color-");
   });
 
   it("passes the template through to the body renderer", () => {
