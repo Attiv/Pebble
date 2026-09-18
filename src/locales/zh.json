@@ -897,7 +897,7 @@
     "wechat": "微信",
     "wechatDesc": "灰色通栏配方形白卡，正文字号最大，动作按钮用微信绿。",
     "telegram": "Telegram",
-    "telegramDesc": "双列布局：发件人、操作与附件收在左侧白色栏，正文独立成卡。",
+    "telegramDesc": "单列布局：通栏白色抬头配字母章，操作行排在正文之下。",
     "imessage": "iMessage",
     "imessageDesc": "iOS 系统灰底配大圆角白卡，中性的灰色字母章。"
   },

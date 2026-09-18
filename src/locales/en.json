@@ -897,7 +897,7 @@
     "wechat": "WeChat",
     "wechatDesc": "Flat grey page with square white cards, the largest body type and the WeChat green.",
     "telegram": "Telegram",
-    "telegramDesc": "Two columns: sender, actions and attachments in a white rail beside the message.",
+    "telegramDesc": "One column under Telegram's blue: a full-width header band, a monogram, and the actions under the message.",
     "imessage": "iMessage",
     "imessageDesc": "iOS system grey behind very round white cards, with a neutral grey monogram."
   },

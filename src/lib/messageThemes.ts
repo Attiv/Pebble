@@ -615,8 +615,10 @@ const wechat: MessageTheme = {
 };
 
 /**
- * 7. Telegram — two columns: the sender, the actions and the attachments sit in
- * a white rail beside the message, all of it under Telegram's blue.
+ * 7. Telegram — one column under Telegram's blue: a full-width white header
+ * band, the sender's monogram, and the actions on their own line under the
+ * message. Telegram's own chat has a single thread, so the rail that carries
+ * Console's metadata has nothing to do here and only narrowed the message.
  */
 const telegram: MessageTheme = {
   id: "telegram",
@@ -628,7 +630,7 @@ const telegram: MessageTheme = {
   divider: "1px solid #dadce0",
   preview: { page: "#f4f4f5", card: "#ffffff", title: "#212121", text: "#707579", accent: "#3390ec" },
   layout: {
-    structure: "columns",
+    structure: "stacked",
     contentWidth: "none",
     gutter: "16px",
     sectionGap: "12px",
@@ -636,8 +638,8 @@ const telegram: MessageTheme = {
     headerCard: false,
     headerFullBleed: true,
     avatar: true,
-    toolbar: "sidebar",
-    toolbarIndent: "0",
+    toolbar: "below",
+    toolbarIndent: "48px",
   },
   page: { background: "#f4f4f5" },
   header: {

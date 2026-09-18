@@ -166,8 +166,8 @@ describe("message theme registry", () => {
 
   it("reuses arrangements on purpose, but keeps most of them distinct", () => {
     // A brand skin may share an arrangement with a neutral template — WeChat is
-    // Mailbox in different clothes, Telegram is Console. `shapeSignature` above
-    // is what stops that from becoming a pure recolour.
+    // Mailbox in different clothes. `shapeSignature` above is what stops that
+    // from becoming a pure recolour.
     const arrangements = new Set(MESSAGE_THEMES.map(arrangementSignature));
     expect(arrangements.size).toBeGreaterThanOrEqual(6);
 
