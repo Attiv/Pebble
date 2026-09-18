@@ -796,6 +796,36 @@ export function readStoredMessageTheme(storage: Pick<Storage, "getItem">): Messa
   return isMessageThemeId(stored) ? stored : DEFAULT_MESSAGE_THEME;
 }
 
+/**
+ * The palette a thumbnail of this template should be drawn in.
+ *
+ * A `"fixed"` template is its own answer: {@link MessageTheme.preview} describes
+ * the colours it will really paint, in either app theme.
+ *
+ * An `"adaptive"` one carries no such second palette — it publishes the app's
+ * own tokens, so its thumbnail has to be built from those tokens as well. Drawn
+ * from the light snapshot instead, it advertised a light reading pane for a
+ * template that renders dark the moment the app is in dark mode: the one
+ * preview in the picker that showed a pane nobody would ever see. Each value
+ * comes from the field the theme actually renders with, so the two cannot
+ * drift apart.
+ */
+export function messageThemePreviewPalette(theme: MessageTheme): MessageTheme["preview"] {
+  if (theme.paletteMode !== "adaptive") return theme.preview;
+  return {
+    page: theme.page.background,
+    // A transparent surface is a template that draws no card at all (Mailbox),
+    // and a thumbnail has nothing to lift off the page for it.
+    card:
+      theme.surface.background === "transparent"
+        ? theme.page.background
+        : theme.surface.background,
+    title: theme.type.title.color,
+    text: theme.type.meta.color,
+    accent: theme.accent,
+  };
+}
+
 export type MessageThemeStyle = CSSProperties & Record<`--msg-${string}`, string>;
 
 /**

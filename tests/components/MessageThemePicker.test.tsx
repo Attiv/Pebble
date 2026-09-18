@@ -48,6 +48,30 @@ describe("MessageThemePicker", () => {
     expect(new Set(rendered).size).toBe(MESSAGE_THEMES.length);
   });
 
+  it("paints an adaptive thumbnail with the app's tokens, not the light snapshot", () => {
+    render(<MessageThemePicker activeTheme="card" onSelect={vi.fn()} />);
+
+    for (const theme of MESSAGE_THEMES) {
+      const option = document.querySelector(`[data-message-theme-option="${theme.id}"]`);
+      const css = option?.querySelector('[aria-hidden="true"]')?.getAttribute("style") ?? "";
+
+      if (theme.paletteMode === "adaptive") {
+        // Card and Mailbox are the two panes the app theme repaints, so their
+        // thumbnails have to be drawn with the same tokens — painted from the
+        // light snapshot they advertise a light pane in a dark app.
+        expect(css).toMatch(/background:\s*var\(--color-/);
+        expect(css).not.toContain(theme.preview.page);
+        // A token cannot take an alpha suffix; `var(--color-border)66` is not a
+        // colour, so the declaration would be dropped and the edge along with it.
+        expect(css).not.toMatch(/var\(--color-[a-z-]+\)[0-9a-f]{2}/);
+      } else {
+        // A fixed template carries a literal colour, which jsdom reports as rgb().
+        expect(css).toMatch(/background:\s*rgb\(/);
+        expect(css).not.toMatch(/background:\s*var\(--color-/);
+      }
+    }
+  });
+
   it("marks exactly the active template as checked", () => {
     render(<MessageThemePicker activeTheme="telegram" onSelect={vi.fn()} />);
 

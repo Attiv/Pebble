@@ -8,6 +8,7 @@ import {
   isMessageThemeId,
   messageThemeBodyRule,
   messageThemeContentCss,
+  messageThemePreviewPalette,
   messageThemeVariables,
   readStoredMessageTheme,
   senderInitials,
@@ -232,6 +233,40 @@ describe("message theme registry", () => {
     expect(readStoredMessageTheme(store("console"))).toBe("console");
     expect(readStoredMessageTheme(store("bogus"))).toBe(DEFAULT_MESSAGE_THEME);
     expect(readStoredMessageTheme(store(null))).toBe(DEFAULT_MESSAGE_THEME);
+  });
+});
+
+describe("message theme preview palette", () => {
+  it("leaves a fixed template's own palette alone", () => {
+    for (const theme of MESSAGE_THEMES) {
+      if (theme.paletteMode !== "fixed") continue;
+      expect(messageThemePreviewPalette(theme)).toEqual(theme.preview);
+    }
+  });
+
+  it("draws an adaptive thumbnail from the tokens the template renders with", () => {
+    for (const theme of MESSAGE_THEMES) {
+      if (theme.paletteMode !== "adaptive") continue;
+      const palette = messageThemePreviewPalette(theme);
+
+      expect(palette.page).toBe(theme.page.background);
+      expect(palette.title).toBe(theme.type.title.color);
+      expect(palette.text).toBe(theme.type.meta.color);
+      expect(palette.accent).toBe(theme.accent);
+      // A hex here is the bug this exists to prevent: the thumbnail would keep
+      // advertising a light pane while the app is dark.
+      for (const value of Object.values(palette)) {
+        expect(value).toContain("var(--color-");
+      }
+    }
+  });
+
+  it("lifts the thumbnail off the page even when the template draws no card", () => {
+    // Mailbox paints no surface of its own, so the preview would otherwise be a
+    // rectangle of the page colour with nothing in it.
+    const mailbox = getMessageTheme("mailbox");
+    expect(mailbox.surface.background).toBe("transparent");
+    expect(messageThemePreviewPalette(mailbox).card).toBe(mailbox.page.background);
   });
 });
 

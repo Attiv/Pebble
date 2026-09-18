@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Check } from "lucide-react";
 import {
   MESSAGE_THEMES,
+  messageThemePreviewPalette,
   type MessageTheme,
   type MessageThemeId,
 } from "@/lib/messageThemes";
@@ -33,18 +34,29 @@ function thumbnailRadius(value: string): number {
  * Deriving all of it from `layout` / `surface` / `avatar` means two templates
  * that merely share an arrangement still read as different here — brand skins
  * differ in roundness and material as much as in structure.
+ *
+ * The palette comes from {@link messageThemePreviewPalette}, which hands an
+ * adaptive template the app's tokens instead of the light snapshot in
+ * `preview` — otherwise this thumbnail keeps advertising a light pane while the
+ * app is dark.
  */
 export function MessageThemePreview({ theme }: { theme: MessageTheme }) {
-  const { preview, layout, surface, avatar } = theme;
-  const hairline = `${preview.text}33`;
+  const preview = messageThemePreviewPalette(theme);
+  const { layout, surface, avatar } = theme;
+  // Hairlines are the theme's own text colour faded out, which only works on a
+  // literal hex — an adaptive template takes the app's border token instead.
+  const hairline =
+    theme.paletteMode === "adaptive" ? "var(--color-border)" : `${preview.text}33`;
   const radius = thumbnailRadius(surface.radius);
   const roundAvatar = avatar.radius.includes("%");
   const avatarRadius = roundAvatar ? "50%" : `${thumbnailRadius(avatar.radius)}px`;
   const raised = surface.shadow !== "none";
   const outlined = surface.border !== "none";
   // A card that draws no rule of its own still needs an edge at this size, or
-  // the thumbnail reads as an empty page.
-  const surfaceEdge = outlined ? `1px solid ${hairline}` : `1px solid ${hairline}66`;
+  // the thumbnail reads as an empty page. The border token an adaptive template
+  // uses has no alpha to add to, so it serves both strengths there.
+  const faintHairline = theme.paletteMode === "adaptive" ? hairline : `${hairline}66`;
+  const surfaceEdge = `1px solid ${outlined ? hairline : faintHairline}`;
 
   const frame: CSSProperties = {
     display: "block",
