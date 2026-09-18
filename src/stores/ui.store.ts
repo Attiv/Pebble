@@ -1,6 +1,12 @@
 import { create } from "zustand";
 import i18n from "@/lib/i18n";
 import { getInitialLanguage, LANGUAGE_STORAGE_KEY, type Language } from "@/lib/language";
+import {
+  isMessageThemeId,
+  MESSAGE_THEME_STORAGE_KEY,
+  readStoredMessageTheme,
+  type MessageThemeId,
+} from "@/lib/messageThemes";
 import { profileLocalStorage, profileSessionStorage } from "@/lib/profileStorage";
 import { readStartHiddenToTrayPreference, START_HIDDEN_TO_TRAY_KEY } from "@/lib/startupVisibility";
 import { useComposeStore } from "./compose.store";
@@ -115,6 +121,7 @@ const initialKeepRunningInBackground = readKeepRunningInBackgroundPreference();
 const initialStartHiddenToTray = readStartHiddenToTrayPreference();
 const initialLanguage = getInitialLanguage();
 const initialBackgroundImage = readBackgroundImageSettings();
+const initialMessageTheme = readStoredMessageTheme(profileLocalStorage);
 
 /** Resolve "system" theme to an actual "dark" | "light" value. */
 export function resolveTheme(theme: Theme): "dark" | "light" {
@@ -133,6 +140,8 @@ interface UIState {
   sidebarCollapsed: boolean;
   activeView: ActiveView;
   theme: Theme;
+  /** Visual template used by the message-detail view. */
+  messageTheme: MessageThemeId;
   backgroundImage: BackgroundImageSettings | null;
   language: Language;
   syncStatus: "idle" | "syncing" | "error";
@@ -154,6 +163,7 @@ interface UIState {
   clearPendingContact: () => void;
   openMessageInInbox: (messageId: string) => void;
   setTheme: (theme: Theme) => void;
+  setMessageTheme: (theme: MessageThemeId) => void;
   setBackgroundImage: (image: { path: string; filename: string }) => void;
   setBackgroundImageFit: (fit: BackgroundImageFit) => void;
   setBackgroundImageOpacity: (opacity: number) => void;
@@ -180,6 +190,7 @@ export const useUIStore = create<UIState>((set) => ({
   sidebarCollapsed: false,
   activeView: "inbox",
   theme: (profileLocalStorage.getItem("pebble-theme") as Theme) || "light",
+  messageTheme: initialMessageTheme,
   backgroundImage: initialBackgroundImage,
   language: initialLanguage,
   syncStatus: "idle",
@@ -250,6 +261,11 @@ export const useUIStore = create<UIState>((set) => ({
     profileLocalStorage.setItem("pebble-theme", theme);
     applyThemeToDom(theme);
     set({ theme });
+  },
+  setMessageTheme: (messageTheme) => {
+    if (!isMessageThemeId(messageTheme)) return;
+    profileLocalStorage.setItem(MESSAGE_THEME_STORAGE_KEY, messageTheme);
+    set({ messageTheme });
   },
   setBackgroundImage: (image) => {
     const current = useUIStore.getState().backgroundImage;

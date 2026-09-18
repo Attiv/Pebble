@@ -2,25 +2,29 @@ import { useRef, useLayoutEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openMailtoUrl } from "@/app/useMailtoOpen";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
+import { messageThemeContentCss, type MessageTheme } from "@/lib/messageThemes";
+import { SOURCE_ECHO_CSS } from "@/lib/sourceEcho";
 
 interface ShadowDomEmailProps {
   html: string;
   className?: string;
+  /**
+   * Optional message-detail theme. The theme only contributes reading
+   * typography and a content sheet colour — the mail's own markup, the
+   * sanitizer and the link handling are untouched by it.
+   */
+  theme?: MessageTheme | null;
 }
 
-export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
-  const hostRef = useRef<HTMLDivElement>(null);
-
-  // The shadow body must be ready before paint; otherwise the reader can flash
-  // from the fallback text into the sanitized HTML a frame later.
-  useLayoutEffect(() => {
-    if (!hostRef.current) return;
-    const shadow = hostRef.current.shadowRoot
-      || hostRef.current.attachShadow({ mode: "open" });
-
-    const safeHtml = sanitizeHtml(html);
-    shadow.innerHTML = `
-      <style>
+/**
+ * The shadow root's whole stylesheet, as data.
+ *
+ * Kept separate from delivery so the same rules can travel either as a
+ * constructable stylesheet or as a `<style>` element, and so tests can assert
+ * on the rules without standing up a shadow root.
+ */
+export function shadowEmailCss(theme?: MessageTheme | null): string {
+  return `
         :host {
           all: initial;
           display: block;
@@ -98,9 +102,57 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
           max-width: 100%;
           box-sizing: border-box;
         }
-      </style>
-      <div class="pebble-email-content">${safeHtml}</div>
-    `;
+        ${SOURCE_ECHO_CSS}
+        ${theme ? messageThemeContentCss(theme) : ""}`;
+}
+
+/**
+ * Hand the stylesheet to the shadow root as a constructable stylesheet.
+ *
+ * A `<style>` element is *inline* content, and under a CSP whose `style-src`
+ * carries a nonce — which is what Tauri generates for the bundled styles —
+ * `'unsafe-inline'` counts for nothing. The webview therefore refused the
+ * `<style>` this component used to inject, and with it everything the shadow
+ * root was relying on: the echo's muted line, the theme's typography and the
+ * mail's own sizing. An adopted sheet is not inline content, so no CSP
+ * directive covers it.
+ *
+ * Returns false where the engine has no constructable stylesheets (jsdom, and
+ * WebKit before 16.4). The `<style>` element stays as the fallback there.
+ */
+export function adoptShadowSheet(shadow: ShadowRoot, css: string): boolean {
+  const Sheet = globalThis.CSSStyleSheet as
+    | (typeof CSSStyleSheet & { prototype: { replaceSync?: unknown } })
+    | undefined;
+  if (!Sheet || typeof Sheet.prototype?.replaceSync !== "function") return false;
+  try {
+    const sheet = new Sheet();
+    sheet.replaceSync(css);
+    shadow.adoptedStyleSheets = [sheet];
+    return shadow.adoptedStyleSheets?.length === 1;
+  } catch {
+    return false;
+  }
+}
+
+export function ShadowDomEmail({ html, className, theme }: ShadowDomEmailProps) {
+  const hostRef = useRef<HTMLDivElement>(null);
+
+  // The shadow body must be ready before paint; otherwise the reader can flash
+  // from the fallback text into the sanitized HTML a frame later.
+  useLayoutEffect(() => {
+    if (!hostRef.current) return;
+    const shadow = hostRef.current.shadowRoot
+      || hostRef.current.attachShadow({ mode: "open" });
+
+    const css = shadowEmailCss(theme);
+    const safeHtml = sanitizeHtml(html);
+    const adopted = adoptShadowSheet(shadow, css);
+
+    shadow.innerHTML = adopted
+      ? `<div class="pebble-email-content">${safeHtml}</div>`
+      : `<style>${css}</style>
+      <div class="pebble-email-content">${safeHtml}</div>`;
 
     const handleClick = (event: Event) => {
       const target = event.target;
@@ -127,7 +179,13 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
     return () => {
       shadow.removeEventListener("click", handleClick);
     };
-  }, [html]);
+  }, [html, theme]);
 
-  return <div ref={hostRef} className={className} />;
+  return (
+    <div
+      ref={hostRef}
+      className={className}
+      data-pebble-message-theme={theme?.id}
+    />
+  );
 }

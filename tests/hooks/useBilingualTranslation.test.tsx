@@ -90,6 +90,151 @@ describe("useBilingualTranslation", () => {
     expect(translated).not.toContain("Docs");
   });
 
+  /// Reported from a read.ai newsletter: the sentence was split by `<strong>`
+  /// into several text nodes, so echoing each node dropped the English into the
+  /// middle of the sentence and the reader saw the two interleaved on one line.
+  it("prints the original once per paragraph, after the whole paragraph", async () => {
+    // One answer per node, so the pairing is 1:1 with the batch.
+    translateMock.mockImplementation(async (batch: string) => ({
+      translated: batch
+        .split("⸻")
+        .map((part) => `〔${part.trim()}〕`)
+        .join("\n⸻\n"),
+      segments: [],
+    }));
+
+    const paragraph =
+      "We noticed you still haven't viewed the meeting report <strong>Skye Jia</strong> shared with you from <strong>Weekly Progress Meeting</strong>.";
+    const { result } = renderHook(() =>
+      useBilingualTranslation(
+        "message-split",
+        makeRendered(`<div>${paragraph}</div>`),
+        makeMessage(),
+      ),
+    );
+
+    await toggle(result);
+
+    const translated = result.current.bilingualResult?.translated ?? "";
+    // One echo for the paragraph, not one per fragment.
+    expect(translated.match(/pebble-source-echo/g) ?? []).toHaveLength(1);
+
+    // It sits after everything the engine rewrote, and carries the whole
+    // paragraph in the message's own words rather than a single fragment.
+    const echoIndex = translated.indexOf("pebble-source-echo");
+    expect(translated.lastIndexOf("〔")).toBeLessThan(echoIndex);
+    const echo = translated.slice(echoIndex);
+    expect(echo).toContain("We noticed you still haven't viewed the meeting report");
+    expect(echo).toContain("Skye Jia");
+    expect(echo).toContain("Weekly Progress Meeting");
+
+    // …and it is a sibling of the paragraph's content, never inside one of the
+    // inline elements the sender used.
+    expect(echo).not.toContain("</strong>");
+  });
+
+  it("still echoes a paragraph that is a single text node", async () => {
+    translateMock.mockImplementation(async (batch: string) => ({
+      translated: batch
+        .split("⸻")
+        .map((part) => `〔${part.trim()}〕`)
+        .join("\n⸻\n"),
+      segments: [],
+    }));
+
+    const { result } = renderHook(() =>
+      useBilingualTranslation(
+        "message-single",
+        makeRendered(`<p>${LONG_ENGLISH}</p>`),
+        makeMessage(),
+      ),
+    );
+
+    await toggle(result);
+
+    const translated = result.current.bilingualResult?.translated ?? "";
+    expect(translated.match(/pebble-source-echo/g) ?? []).toHaveLength(1);
+    expect(translated.slice(translated.indexOf("pebble-source-echo"))).toContain(LONG_ENGLISH);
+  });
+
+  /// The echo must carry nothing but a class. Carried as an inline `style`, the
+  /// declarations never survived to the paint — the reader saw the original as
+  /// plain body text running on from the translation, which is the whole bug.
+  /// The look lives in the shadow root; this pins that down.
+  it("marks the echoed original with a class and no inline style", async () => {
+    translateMock.mockResolvedValue(reply("报告已随附，请在周五前查阅。"));
+    const { result } = renderHook(() =>
+      useBilingualTranslation(
+        "message-class",
+        makeRendered(`<p>${LONG_ENGLISH}</p>`),
+        makeMessage(),
+      ),
+    );
+
+    await toggle(result);
+
+    const translated = result.current.bilingualResult?.translated ?? "";
+    expect(translated).toContain('<span class="pebble-source-echo">');
+    expect(translated).not.toContain("style=");
+  });
+
+  /// A translator handed a sentence that arrived split by `<strong>` answers it
+  /// as one sentence, so the reply has one part for several fragments. Pairing
+  /// that positionally shifted every answer by one and left a fragment holding
+  /// a whole sentence the engine had written.
+  it("refuses to pair a merged reply rather than shifting every answer", async () => {
+    translateMock.mockResolvedValue({ translated: "一整句合并后的译文。", segments: [] });
+    const rendered = makeRendered(`<p>${LONG_ENGLISH}</p><p>${LONG_ENGLISH_2}</p>`);
+    const { result } = renderHook(() =>
+      useBilingualTranslation("message-merged", rendered, makeMessage()),
+    );
+
+    await toggle(result);
+
+    // Nothing is written anywhere: the mail keeps the sender's own wording and
+    // the reader is told why, instead of being shown a scrambled translation.
+    expect(result.current.bilingualResult).toBeNull();
+    expect(result.current.bilingualError?.code).toBe("failed");
+    expect(result.current.bilingualError?.detail).toContain("once per fragment");
+  });
+
+  /// A service that drops the separator but still answers one line per fragment
+  /// can be paired safely, so it still is.
+  it("pairs a separator-less reply that answers one line per fragment", async () => {
+    translateMock.mockResolvedValue({ translated: "第一段译文。\n第二段译文。", segments: [] });
+    const rendered = makeRendered(`<p>${LONG_ENGLISH}</p><p>${LONG_ENGLISH_2}</p>`);
+    const { result } = renderHook(() =>
+      useBilingualTranslation("message-lines", rendered, makeMessage()),
+    );
+
+    await toggle(result);
+
+    const translated = result.current.bilingualResult?.translated ?? "";
+    expect(translated).toContain("第一段译文。");
+    expect(translated).toContain("第二段译文。");
+    expect(result.current.bilingualWarning).toBeNull();
+  });
+
+  /// With one fragment there is nothing to shift against, so a reflowed reply
+  /// is still that fragment's translation.
+  it("accepts a reflowed reply when there is only one fragment", async () => {
+    translateMock.mockResolvedValue({ translated: "第一行。\n第二行。", segments: [] });
+    const { result } = renderHook(() =>
+      useBilingualTranslation(
+        "message-onefrag",
+        makeRendered(`<p>${LONG_ENGLISH}</p>`),
+        makeMessage(),
+      ),
+    );
+
+    await toggle(result);
+
+    const translated = result.current.bilingualResult?.translated ?? "";
+    expect(translated).toContain("第一行。");
+    expect(translated).toContain("第二行。");
+    expect(result.current.bilingualError).toBeNull();
+  });
+
   /// Before this, an engine that answered with nothing left the English body on
   /// screen looking like a translation that had worked.
   it("reports an answer with no text instead of showing the original as the translation", async () => {

@@ -20,6 +20,11 @@ interface Props {
   folderRole?: string | null;
   onBack: () => void;
   onMessageUpdate: (msg: Message) => void;
+  /**
+   * `vertical` stacks the actions, for themes that park the toolbar in a
+   * details sidebar. Spacing lives in the stylesheet so themes can adjust it.
+   */
+  orientation?: "horizontal" | "vertical";
 }
 
 export default function MessageActionToolbar({
@@ -27,6 +32,7 @@ export default function MessageActionToolbar({
   folderRole,
   onBack,
   onMessageUpdate,
+  orientation = "horizontal",
 }: Props) {
   const { t } = useTranslation();
   const openCompose = useComposeStore((s) => s.openCompose);
@@ -161,7 +167,11 @@ export default function MessageActionToolbar({
 
   return (
     <>
-      <div style={{ display: "flex", gap: "2px", padding: "4px 16px 4px 48px", position: "relative" }}>
+      <div
+        className="message-action-toolbar"
+        data-orientation={orientation}
+        style={{ display: "flex", gap: "2px", position: "relative" }}
+      >
         {actions.map(({ icon: Icon, label, action, active, disabled }, i) => (
           <button
             key={i}

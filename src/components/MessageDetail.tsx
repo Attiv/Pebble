@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Clock, Languages, Sparkles } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { ArrowLeft, Clock, Languages, Palette, Sparkles } from "lucide-react";
 import { trustSender } from "@/lib/api";
 import { useTranslation } from "react-i18next";
 import type { PrivacyMode, TranslateResult } from "@/lib/api";
@@ -17,10 +17,12 @@ import { useMessageLoader } from "@/hooks/useMessageLoader";
 import { useBilingualTranslation } from "@/hooks/useBilingualTranslation";
 import type { BilingualError } from "@/hooks/useBilingualTranslation";
 import { defaultPrivacyMode } from "@/lib/privacyMode";
+import { getMessageTheme, messageThemeVariables, senderInitials } from "@/lib/messageThemes";
 import { useKanbanStore } from "@/stores/kanban.store";
 import { useToastStore } from "@/stores/toast.store";
 import { useUIStore } from "@/stores/ui.store";
 import SelectionActionPopover from "./SelectionActionPopover";
+import MessageThemePicker from "./MessageThemePicker";
 import type { EmailAddress } from "@/lib/api";
 import ContactAddressAction from "./ContactAddressAction";
 import { uniqueContactParticipants } from "./contact-participants";
@@ -55,6 +57,11 @@ function formatRecipients(addresses: EmailAddress[]): string {
 
 export default function MessageDetail({ messageId, onBack, folderRole }: Props) {
   const { t } = useTranslation();
+  // The message-detail template is a stored preference, not local state, so
+  // switching it in one message carries over to the next one.
+  const messageThemeId = useUIStore((s) => s.messageTheme);
+  const setMessageTheme = useUIStore((s) => s.setMessageTheme);
+  const theme = getMessageTheme(messageThemeId);
   const [privacyOverride, setPrivacyOverride] = useState<{
     messageId: string;
     mode: PrivacyMode;
@@ -66,10 +73,12 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
   const [showSelectionActions, setShowSelectionActions] = useState<{ text: string; position: { x: number; y: number } } | null>(null);
   const [showTranslate, setShowTranslate] = useState<{ text: string; position: { x: number; y: number } } | null>(null);
   const [showAiSummary, setShowAiSummary] = useState(false);
+  const [showThemePicker, setShowThemePicker] = useState(false);
 
   const snoozeRef = useRef<HTMLDivElement>(null);
   const selectionActionsRef = useRef<HTMLDivElement>(null);
   const translateRef = useRef<HTMLDivElement>(null);
+  const themePickerRef = useRef<HTMLDivElement>(null);
 
   const { message, setMessage, rendered, loading, error } = useMessageLoader(messageId, privacyMode);
   const {
@@ -85,6 +94,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
   useClickOutside(snoozeRef, showSnooze, () => setShowSnooze(false));
   useClickOutside(selectionActionsRef, !!showSelectionActions, () => setShowSelectionActions(null));
   useClickOutside(translateRef, !!showTranslate, () => setShowTranslate(null));
+  useClickOutside(themePickerRef, showThemePicker, () => setShowThemePicker(false));
 
   // Reset bilingual state when messageId changes
   useEffect(() => {
@@ -284,271 +294,327 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
     message.cc_list,
   );
 
+  /* ── Theme layout ───────────────────────────────────────────────────────────
+   * Every structural decision comes from `theme.layout`; nothing below branches
+   * on a theme id. `data-msg-*` tells the stylesheet which grid template to use,
+   * and the `--msg-*` variables carry the measurements.
+   */
+  const layout = theme.layout;
+  const inColumns = layout.structure === "columns";
+  const toolbarInSidebar = layout.toolbar === "sidebar";
+
+  const backButton = (
+    <button
+      className="message-detail-back"
+      onClick={onBack}
+      aria-label={t("compose.back", "Back")}
+    >
+      <ArrowLeft size={18} />
+    </button>
+  );
+
+  const headerActions = (
+    <div className="message-detail-actions">
+      <div ref={snoozeRef} className="message-detail-action-slot">
+        <button
+          className="message-detail-icon-button"
+          onClick={() => setShowSnooze(!showSnooze)}
+          aria-pressed={showSnooze}
+          title={t("messageActions.snooze", "Snooze message")}
+          aria-label={t("messageActions.snooze", "Snooze message")}
+        >
+          <Clock size={16} />
+        </button>
+        {showSnooze && (
+          <SnoozePopover
+            messageId={messageId}
+            onClose={() => setShowSnooze(false)}
+            onSnoozed={() => {
+              setShowSnooze(false);
+              onBack();
+            }}
+          />
+        )}
+      </div>
+      <div ref={themePickerRef} className="message-detail-action-slot">
+        <button
+          className="message-detail-icon-button"
+          onClick={() => setShowThemePicker((visible) => !visible)}
+          aria-pressed={showThemePicker}
+          aria-haspopup="dialog"
+          title={t("messageThemes.picker", "Message theme")}
+          aria-label={t("messageThemes.picker", "Message theme")}
+        >
+          <Palette size={16} />
+        </button>
+        {showThemePicker && (
+          <MessageThemePicker activeTheme={messageThemeId} onSelect={setMessageTheme} />
+        )}
+      </div>
+      <button
+        className="message-detail-icon-button"
+        onClick={handleBilingualToggle}
+        aria-pressed={bilingualMode}
+        title={t("messageActions.bilingualView", "Toggle bilingual view")}
+        aria-label={t("messageActions.bilingualView", "Toggle bilingual view")}
+      >
+        <Languages size={16} />
+      </button>
+      <button
+        className="message-detail-icon-button"
+        onClick={() => setShowAiSummary((visible) => !visible)}
+        aria-pressed={showAiSummary}
+        title={t("ai.summarize")}
+        aria-label={t("ai.summarize")}
+      >
+        <Sparkles size={16} />
+      </button>
+    </div>
+  );
+
+  // Kept as one node so header and sidebar share the exact same markup — only
+  // the surrounding grid container differs.
+  const avatarNode = layout.avatar ? (
+    <span className="message-detail-avatar" aria-hidden="true">
+      {senderInitials(message.from_name, message.from_address)}
+    </span>
+  ) : null;
+
+  const identityNode = (
+    <div className="message-detail-identity">
+      <div className="message-detail-from">
+        <span className="message-detail-from-name">
+          {message.from_name || message.from_address}
+        </span>
+        {message.from_name && (
+          <span className="message-detail-from-address">&lt;{message.from_address}&gt;</span>
+        )}
+      </div>
+      {(recipientLine || ccLine) && (
+        <div className="message-detail-recipients">
+          {recipientLine && (
+            <span>
+              {t("messageDetail.to", "To:")}&nbsp;{recipientLine}
+            </span>
+          )}
+          {ccLine && (
+            <span>
+              {t("messageDetail.cc", "Cc:")}&nbsp;{ccLine}
+            </span>
+          )}
+        </div>
+      )}
+      <div
+        className="message-detail-contacts"
+        aria-label={t("contacts.participantActions", "Contact actions")}
+      >
+        {contactParticipants.map((participant) => (
+          <ContactAddressAction
+            key={participant.address.toLowerCase()}
+            accountId={message.account_id}
+            name={participant.name}
+            address={participant.address}
+          />
+        ))}
+      </div>
+      <div className="message-detail-date">{formatFullDate(message.date)}</div>
+    </div>
+  );
+
+  const actionToolbar = (
+    <div className="message-detail-toolbar">
+      <MessageActionToolbar
+        message={message}
+        folderRole={folderRole}
+        onBack={onBack}
+        onMessageUpdate={setMessage}
+        orientation={toolbarInSidebar ? "vertical" : "horizontal"}
+      />
+    </div>
+  );
+
+  const attachmentNode = message.has_attachments ? (
+    <AttachmentList messageId={message.id} variant={inColumns ? "panel" : "bar"} />
+  ) : null;
+
   return (
     <div
       className="message-detail-container"
+      data-message-theme={theme.id}
+      data-msg-structure={layout.structure}
+      data-msg-align={layout.align}
+      data-msg-toolbar={layout.toolbar}
+      data-msg-header-card={layout.headerCard ? "true" : "false"}
+      data-msg-avatar={layout.avatar ? "true" : "false"}
+      data-msg-full-bleed={layout.headerFullBleed ? "true" : "false"}
       style={{
         display: "flex",
         flexDirection: "column",
         height: "100%",
+        // The page colour lives in the stylesheet (`.message-detail-container`)
+        // so a custom app wallpaper can still win over it.
+        ...messageThemeVariables(theme),
       }}
     >
-      {/* Header */}
-      <div
-        style={{
-          padding: "12px 16px",
-          borderBottom: "1px solid var(--color-border)",
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
-          <button
-            onClick={onBack}
-            aria-label={t("compose.back", "Back")}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              padding: "4px",
-              borderRadius: "4px",
-              color: "var(--color-text-secondary)",
-              display: "flex",
-              alignItems: "center",
-            }}
-          >
-            <ArrowLeft size={18} />
-          </button>
-          <h2
-            style={{
-              fontSize: "15px",
-              fontWeight: "600",
-              color: "var(--color-text-primary)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              margin: 0,
-            }}
-          >
-            {message.subject || t("inbox.noSubject", "(no subject)")}
-          </h2>
-          <div ref={snoozeRef} style={{ position: "relative", marginLeft: "auto", flexShrink: 0 }}>
-            <button
-              onClick={() => setShowSnooze(!showSnooze)}
-              style={{
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                padding: "4px",
-                borderRadius: "4px",
-                color: "var(--color-text-secondary)",
-                display: "flex",
-                alignItems: "center",
-              }}
-              title={t("messageActions.snooze", "Snooze message")}
-              aria-label={t("messageActions.snooze", "Snooze message")}
-            >
-              <Clock size={16} />
-            </button>
-            {showSnooze && (
-              <SnoozePopover
-                messageId={messageId}
-                onClose={() => setShowSnooze(false)}
-                onSnoozed={() => {
-                  setShowSnooze(false);
-                  onBack();
-                }}
-              />
-            )}
+      {/* Header — subject, sender identity and the action toolbar */}
+      <div className="message-detail-header">
+        <div className="message-detail-header-inner">
+          {/* `display: contents` promotes these three into the header grid, so the
+              back button, subject and icon cluster can be placed by template. */}
+          <div className="message-detail-topbar">
+            {backButton}
+            <h2 className="message-detail-title">
+              {message.subject || t("inbox.noSubject", "(no subject)")}
+            </h2>
+            {headerActions}
           </div>
-          <button
-            onClick={handleBilingualToggle}
-            aria-pressed={bilingualMode}
-            style={{
-              background: bilingualMode ? "var(--color-bg-hover)" : "none",
-              border: "none",
-              cursor: "pointer",
-              padding: "4px",
-              borderRadius: "4px",
-              color: bilingualMode ? "var(--color-accent)" : "var(--color-text-secondary)",
-              display: "flex",
-              alignItems: "center",
-              flexShrink: 0,
-            }}
-            title={t("messageActions.bilingualView", "Toggle bilingual view")}
-            aria-label={t("messageActions.bilingualView", "Toggle bilingual view")}
-          >
-            <Languages size={16} />
-          </button>
-          <button
-            onClick={() => setShowAiSummary((visible) => !visible)}
-            aria-pressed={showAiSummary}
-            style={{
-              background: showAiSummary ? "var(--color-bg-hover)" : "none",
-              border: "none",
-              cursor: "pointer",
-              padding: "4px",
-              borderRadius: "4px",
-              color: showAiSummary ? "var(--color-accent)" : "var(--color-text-secondary)",
-              display: "flex",
-              alignItems: "center",
-              flexShrink: 0,
-            }}
-            title={t("ai.summarize")}
-            aria-label={t("ai.summarize")}
-          >
-            <Sparkles size={16} />
-          </button>
-        </div>
-        {/* Action Toolbar */}
-        <MessageActionToolbar
-          message={message}
-          folderRole={folderRole}
-          onBack={onBack}
-          onMessageUpdate={setMessage}
-        />
-        <div style={{ paddingLeft: "32px" }}>
-          <div style={{ fontSize: "13px", color: "var(--color-text-primary)", marginBottom: "2px" }}>
-            <span style={{ fontWeight: "500" }}>
-              {message.from_name || message.from_address}
-            </span>
-            {message.from_name && (
-              <span style={{ color: "var(--color-text-secondary)", marginLeft: "6px" }}>
-                &lt;{message.from_address}&gt;
-              </span>
-            )}
-            {recipientLine && (
-              <span style={{ color: "var(--color-text-secondary)", marginLeft: "6px", fontSize: "12px" }}>
-                {t("messageDetail.to", "To:")}&nbsp;{recipientLine}
-              </span>
-            )}
-            {ccLine && (
-              <span style={{ color: "var(--color-text-secondary)", marginLeft: "6px", fontSize: "12px" }}>
-                {t("messageDetail.cc", "Cc:")}&nbsp;{ccLine}
-              </span>
-            )}
-          </div>
-          <div
-            aria-label={t("contacts.participantActions", "Contact actions")}
-            style={{ display: "flex", alignItems: "center", gap: "3px", margin: "3px 0" }}
-          >
-            {contactParticipants.map((participant) => (
-              <ContactAddressAction
-                key={participant.address.toLowerCase()}
-                accountId={message.account_id}
-                name={participant.name}
-                address={participant.address}
-              />
-            ))}
-          </div>
-          <div style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>
-            {formatFullDate(message.date)}
-          </div>
+          {!inColumns && avatarNode}
+          {!inColumns && identityNode}
+          {!inColumns && !toolbarInSidebar && actionToolbar}
         </div>
       </div>
 
-      {/* Privacy Banner */}
-      {rendered && (
-        <PrivacyBanner
-          rendered={rendered}
-          onLoadImages={handleLoadImages}
-          onTrustSender={handleTrustSender}
-        />
-      )}
-
-      {/* AI summary — sits outside the body so reading it can never alter the mail */}
-      {showAiSummary && (
-        <AiSummaryCard messageId={messageId} onClose={() => setShowAiSummary(false)} />
-      )}
-
-      {/* Body */}
-      <div
-        className="scroll-region message-body-scroll"
-        tabIndex={0}
-        role="region"
-        aria-label={t("messageDetail.body", "Message body")}
-        style={{ flex: 1, overflow: "auto", padding: "16px" }}
-        onContextMenu={handleContextMenu}
-      >
-        {bilingualMode && bilingualLoading ? (
-            <div style={{ fontSize: "13px", color: "var(--color-text-secondary)" }}>{t("common.translating", "Translating...")}</div>
-        ) : bilingualMode && bilingualResult ? (
-          <>
-            {bilingualWarning && (
-              <div
-                role="status"
-                style={{
-                  fontSize: "12px",
-                  color: "var(--color-warning, #e67e22)",
-                  marginBottom: "10px",
-                }}
-              >
-                {t(
-                  "common.translationIncomplete",
-                  "Some content could not be translated ({{done}}/{{total}}).",
-                  { done: bilingualWarning.done, total: bilingualWarning.total },
-                )}
-              </div>
-            )}
-            {(bilingualResult as TranslateResult & { _isHtml?: boolean })._isHtml ? (
-              <ShadowDomEmail html={bilingualResult.translated} />
-            ) : (
-              <BilingualView segments={bilingualResult.segments ?? []} />
-            )}
-          </>
-        ) : bilingualMode ? (
-          <>
-            <div
-              role="alert"
-              style={{
-                fontSize: "12px",
-                lineHeight: 1.5,
-                color: "var(--color-error, #dc2626)",
-                border: "1px solid var(--color-border)",
-                borderRadius: "6px",
-                padding: "8px 10px",
-                marginBottom: "12px",
-              }}
-            >
-              {bilingualErrorReason(bilingualError)}
-            </div>
-            {/* The mail itself stays readable — a failed translation must not hide it. */}
-            {rendered && rendered.html ? (
-              <ShadowDomEmail html={rendered.html} />
-            ) : (
-              <pre
-                style={{
-                  fontSize: "13px",
-                  color: "var(--color-text-primary)",
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                  margin: 0,
-                  fontFamily: "inherit",
-                }}
-              >
-                {message.body_text}
-              </pre>
-            )}
-          </>
-        ) : rendered && rendered.html ? (
-          <ShadowDomEmail html={rendered.html} />
-        ) : (
-          <pre
-            style={{
-              fontSize: "13px",
-              color: "var(--color-text-primary)",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-              margin: 0,
-              fontFamily: "inherit",
-            }}
-          >
-            {message.body_text}
-          </pre>
+      {/* Body — one column, or a details sidebar plus the reading column */}
+      <div className="message-detail-body-area">
+        {inColumns && (
+          <aside className="message-detail-aside">
+            {avatarNode}
+            {identityNode}
+            {actionToolbar}
+            {attachmentNode}
+          </aside>
         )}
-      </div>
 
-      {/* Attachments */}
-      {message.has_attachments && <AttachmentList messageId={message.id} />}
+        <div className="message-detail-reading">
+          {/* Privacy Banner */}
+          {rendered && (
+            <PrivacyBanner
+              rendered={rendered}
+              onLoadImages={handleLoadImages}
+              onTrustSender={handleTrustSender}
+            />
+          )}
+
+          {/* AI summary — sits outside the body so reading it can never alter the mail */}
+          {showAiSummary && (
+            <AiSummaryCard messageId={messageId} onClose={() => setShowAiSummary(false)} />
+          )}
+
+          <div
+            className="scroll-region message-body-scroll"
+            tabIndex={0}
+            role="region"
+            aria-label={t("messageDetail.body", "Message body")}
+            style={{
+              flex: 1,
+              overflow: "auto",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              padding: "var(--msg-page-padding)",
+            }}
+            onContextMenu={handleContextMenu}
+          >
+            <div
+              className="message-body-surface"
+              style={{
+                width: "100%",
+                maxWidth: "var(--msg-content-width)",
+                boxSizing: "border-box",
+                background: "var(--msg-surface-background)",
+                border: "var(--msg-surface-border)",
+                borderRadius: "var(--msg-surface-radius)",
+                boxShadow: "var(--msg-surface-shadow)",
+                padding: "var(--msg-surface-padding)",
+              }}
+            >
+              {bilingualMode && bilingualLoading ? (
+                <div style={{ fontSize: "13px", color: "var(--color-text-secondary)" }}>{t("common.translating", "Translating...")}</div>
+              ) : bilingualMode && bilingualResult ? (
+                <>
+                  {bilingualWarning && (
+                    <div
+                      role="status"
+                      style={{
+                        fontSize: "12px",
+                        color: "var(--color-warning, #e67e22)",
+                        marginBottom: "10px",
+                      }}
+                    >
+                      {t(
+                        "common.translationIncomplete",
+                        "Some content could not be translated ({{done}}/{{total}}).",
+                        { done: bilingualWarning.done, total: bilingualWarning.total },
+                      )}
+                    </div>
+                  )}
+                  {(bilingualResult as TranslateResult & { _isHtml?: boolean })._isHtml ? (
+                    <ShadowDomEmail html={bilingualResult.translated} theme={theme} />
+                  ) : (
+                    <BilingualView segments={bilingualResult.segments ?? []} />
+                  )}
+                </>
+              ) : bilingualMode ? (
+                <>
+                  <div
+                    role="alert"
+                    style={{
+                      fontSize: "12px",
+                      lineHeight: 1.5,
+                      color: "var(--color-error, #dc2626)",
+                      border: "1px solid var(--color-border)",
+                      borderRadius: "6px",
+                      padding: "8px 10px",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    {bilingualErrorReason(bilingualError)}
+                  </div>
+                  {/* The mail itself stays readable — a failed translation must not hide it. */}
+                  {rendered && rendered.html ? (
+                    <ShadowDomEmail html={rendered.html} theme={theme} />
+                  ) : (
+                    <pre
+                      className="message-body-text"
+                      style={{
+                        fontSize: "var(--msg-body-size)",
+                        lineHeight: "var(--msg-body-line-height)" as CSSProperties["lineHeight"],
+                        color: "var(--msg-body-color)",
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                        margin: 0,
+                        fontFamily: "var(--msg-body-font)",
+                      }}
+                    >
+                      {message.body_text}
+                    </pre>
+                  )}
+                </>
+              ) : rendered && rendered.html ? (
+                <ShadowDomEmail html={rendered.html} theme={theme} />
+              ) : (
+                <pre
+                  className="message-body-text"
+                  style={{
+                    fontSize: "var(--msg-body-size)",
+                    lineHeight: "var(--msg-body-line-height)" as CSSProperties["lineHeight"],
+                    color: "var(--msg-body-color)",
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    margin: 0,
+                    fontFamily: "var(--msg-body-font)",
+                  }}
+                >
+                  {message.body_text}
+                </pre>
+              )}
+            </div>
+          </div>
+
+          {/* Attachments — a footer bar in one column, a sidebar panel in two */}
+          {!inColumns && attachmentNode}
+        </div>
+      </div>
 
       {showTranslate && (
         <div ref={translateRef}>

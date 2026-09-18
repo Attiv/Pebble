@@ -4,6 +4,8 @@ import { Image, Trash2, Upload } from "lucide-react";
 import { useUIStore } from "@/stores/ui.store";
 import type { BackgroundImageFit, Language, Theme } from "@/stores/ui.store";
 import { backgroundImageUrl, deleteBackgroundImage, importBackgroundImage } from "@/lib/backgroundImage";
+import { MESSAGE_THEMES } from "@/lib/messageThemes";
+import { MessageThemeOption } from "@/components/MessageThemePicker";
 
 const THEMES: { id: Theme; labelKey: string; descKey: string }[] = [
   { id: "light", labelKey: "settings.themeLight", descKey: "settings.themeLightDesc" },
@@ -42,6 +44,8 @@ export default function AppearanceTab() {
   const setBackgroundImageFit = useUIStore((s) => s.setBackgroundImageFit);
   const setBackgroundImageOpacity = useUIStore((s) => s.setBackgroundImageOpacity);
   const clearBackgroundImage = useUIStore((s) => s.clearBackgroundImage);
+  const messageTheme = useUIStore((s) => s.messageTheme);
+  const setMessageTheme = useUIStore((s) => s.setMessageTheme);
 
   async function handleBackgroundFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
@@ -101,6 +105,34 @@ export default function AppearanceTab() {
             <div style={{ fontWeight: 600, fontSize: "13px", marginBottom: "4px" }}>{t(th.labelKey)}</div>
             <div style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>{t(th.descKey)}</div>
           </button>
+        ))}
+      </div>
+
+      <h3 style={{ fontSize: "14px", fontWeight: 600, marginBottom: "6px", marginTop: "32px" }}>
+        {t("settings.messageTheme", "Message theme")}
+      </h3>
+      <div style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginBottom: "12px" }}>
+        {t(
+          "settings.messageThemeDesc",
+          "Visual template for the message detail view. Also switchable from the palette icon inside a message.",
+        )}
+      </div>
+      <div
+        role="radiogroup"
+        aria-label={t("settings.messageTheme", "Message theme")}
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+          gap: "8px",
+        }}
+      >
+        {MESSAGE_THEMES.map((option) => (
+          <MessageThemeOption
+            key={option.id}
+            theme={option}
+            selected={option.id === messageTheme}
+            onSelect={setMessageTheme}
+          />
         ))}
       </div>
 

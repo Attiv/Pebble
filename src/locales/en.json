@@ -165,6 +165,8 @@
     "themeDarkDesc": "Easy on the eyes",
     "themeSystem": "System",
     "themeSystemDesc": "Follows your OS setting",
+    "messageTheme": "Message theme",
+    "messageThemeDesc": "Visual template for the message detail view. Also switchable from the palette icon inside a message.",
     "backgroundImage": "Background image",
     "backgroundImageDesc": "Stored locally in Pebble's app data folder.",
     "noBackgroundImage": "No background image",
@@ -511,7 +513,7 @@
     "contextNoteFailed": "Failed to add Kanban note"
   },
   "accountSetup": {
-    "accountAddedTokenFailed": "Account added, but the OAuth2 token could not be verified: {{error}}. You can retry in Settings \u2192 Accounts.",
+    "accountAddedTokenFailed": "Account added, but the OAuth2 token could not be verified: {{error}}. You can retry in Settings → Accounts.",
     "title": "Add Email Account",
     "quickSetup": "Quick setup",
     "emailAddress": "Email address",
@@ -820,7 +822,6 @@
     "engineAi": "via AI service",
     "engineTranslate": "via translation engine"
   },
-
   "selection": {
     "actions": "Selected text actions",
     "copySelectedText": "Copy selected text",
@@ -880,6 +881,26 @@
     "to": "To:",
     "cc": "Cc:"
   },
+  "messageThemes": {
+    "title": "Message theme",
+    "picker": "Message theme",
+    "card": "Card",
+    "cardDesc": "Centred reading column built from two cards. Follows the app's light or dark colours.",
+    "mailbox": "Mailbox",
+    "mailboxDesc": "Full-bleed hairlines and compact type — closest to a native mail client.",
+    "letter": "Letter",
+    "letterDesc": "Warm paper, a centred monogram above the subject and a larger serif body.",
+    "console": "Console",
+    "consoleDesc": "Two columns: sender, actions and attachments on the left, the message on a dark pane.",
+    "claude": "Claude",
+    "claudeDesc": "Ivory page, a centred reading column, serif subject and a warm terracotta accent.",
+    "wechat": "WeChat",
+    "wechatDesc": "Flat grey page with square white cards, the largest body type and the WeChat green.",
+    "telegram": "Telegram",
+    "telegramDesc": "Two columns: sender, actions and attachments in a white rail beside the message.",
+    "imessage": "iMessage",
+    "imessageDesc": "iOS system grey behind very round white cards, with a neutral grey monogram."
+  },
   "xoauth2": {
     "sectionTitle": "IMAP OAuth2 sign-in (XOAUTH2)",
     "enable": "Sign in to IMAP with an OAuth2 token (XOAUTH2)",
@@ -894,7 +915,7 @@
     "clientSecret": "Client secret (optional)",
     "clientSecretHint": "Only needed if the app is registered as a confidential client.",
     "save": "Save & verify token",
-    "saving": "Verifying\u2026",
+    "saving": "Verifying…",
     "saved": "Token verified. IMAP will use it from the next sync onwards.",
     "statusImapToken": "IMAP: signing in with an OAuth2 token",
     "statusImapPassword": "IMAP: signing in with a password",

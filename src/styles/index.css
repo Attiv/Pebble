@@ -244,12 +244,430 @@ option {
   color: var(--color-text-secondary);
 }
 
+/* ─── Message detail · themeable layout ─────────────────────
+   `MessageDetail` publishes the active template as `--msg-*` variables plus a
+   handful of `data-msg-*` structural flags; every arrangement decision is made
+   here so that adding a template stays a data change in
+   `src/lib/messageThemes.ts`. Components never branch on a theme id.
+   ────────────────────────────────────────────────────────── */
+
 .message-detail-container {
-  background-color: var(--color-bg);
+  background: var(--msg-page-background, var(--color-bg));
+  color: var(--msg-title-color, var(--color-text-primary));
+  font-family: var(--msg-font-ui, inherit);
 }
 
+/* A wallpaper should still show through the reading pane. */
 .app-shell--with-background .message-detail-container {
-  background-color: transparent;
+  background: transparent;
+}
+
+/* Header shell: either full-bleed, or inset to line up with the reading column. */
+.message-detail-header {
+  flex-shrink: 0;
+  padding: 0 var(--msg-page-padding, 16px);
+  background: var(--msg-header-background, transparent);
+  border-bottom: var(--msg-header-border, none);
+}
+
+.message-detail-container[data-msg-full-bleed="true"] .message-detail-header {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* Header-as-a-card: the strip becomes page gutter, the inner box is the card. */
+.message-detail-container[data-msg-header-card="true"] .message-detail-header {
+  padding: var(--msg-page-padding, 16px) var(--msg-page-padding, 16px) 0;
+  background: transparent;
+  border-bottom: none;
+}
+
+.message-detail-header-inner {
+  width: 100%;
+  max-width: var(--msg-content-width, none);
+  margin: 0 auto;
+  box-sizing: border-box;
+  padding: var(--msg-header-padding, 12px 16px);
+}
+
+.message-detail-container[data-msg-header-card="true"] .message-detail-header-inner {
+  background: var(--msg-header-card-background, var(--color-bg));
+  border: var(--msg-header-card-border, 1px solid var(--color-border));
+  border-radius: var(--msg-header-card-radius, 12px);
+  box-shadow: var(--msg-header-card-shadow, none);
+}
+
+/* Dissolve the topbar's own box so the back button, subject and icon cluster
+   become grid items and can be arranged by the templates below. */
+.message-detail-topbar {
+  display: contents;
+}
+
+.message-detail-container[data-msg-structure="stacked"] .message-detail-header-inner {
+  display: grid;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.message-detail-container[data-msg-align="start"] .message-detail-header-inner {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+/* Avatar beside the identity, actions indented under the sender name. */
+.message-detail-container[data-msg-align="start"][data-msg-toolbar="below"] .message-detail-header-inner {
+  grid-template-areas:
+    "nav ttl act"
+    "avt txt txt"
+    "bar bar bar";
+}
+
+/* Avatar beside the identity, actions on the identity row. */
+.message-detail-container[data-msg-align="start"][data-msg-toolbar="inline"] .message-detail-header-inner {
+  grid-template-areas:
+    "nav ttl act"
+    "avt txt bar";
+}
+
+/* Centred correspondence: monogram, then subject, then sender, all centred. */
+.message-detail-container[data-msg-align="center"] .message-detail-header-inner {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-areas:
+    "nav .   act"
+    ".   avt ."
+    "ttl ttl ttl"
+    ".   txt ."
+    "bar bar bar";
+  justify-items: center;
+  text-align: center;
+}
+
+.message-detail-back {
+  grid-area: nav;
+  justify-self: start;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  color: var(--msg-meta-color, var(--color-text-secondary));
+}
+
+.message-detail-title {
+  grid-area: ttl;
+  align-self: center;
+  min-width: 0;
+  margin: 0;
+  font-family: var(--msg-title-font, inherit);
+  font-size: var(--msg-title-size, 18px);
+  font-weight: var(--msg-title-weight, 600);
+  letter-spacing: var(--msg-title-spacing, normal);
+  line-height: var(--msg-title-leading, 1.35);
+  color: var(--msg-title-color, var(--color-text-primary));
+  text-align: var(--msg-header-align, start);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-detail-actions {
+  grid-area: act;
+  justify-self: end;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.message-detail-action-slot {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.message-detail-icon-button {
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  color: var(--msg-meta-color, var(--color-text-secondary));
+}
+
+.message-detail-icon-button:hover {
+  background: var(--color-bg-hover);
+}
+
+.message-detail-icon-button[aria-pressed="true"] {
+  background: var(--color-bg-hover);
+  color: var(--msg-accent, var(--color-accent));
+}
+
+.message-detail-avatar {
+  grid-area: avt;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: var(--msg-avatar-size, 32px);
+  height: var(--msg-avatar-size, 32px);
+  border-radius: var(--msg-avatar-radius, 50%);
+  background: var(--msg-avatar-background, var(--color-bg-hover));
+  color: var(--msg-avatar-color, var(--color-accent));
+  font-size: var(--msg-avatar-font-size, 12px);
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+
+.message-detail-identity {
+  grid-area: txt;
+  align-self: center;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: var(--msg-header-align, start);
+}
+
+.message-detail-from {
+  font-size: var(--msg-sender-size, 13px);
+  font-weight: var(--msg-sender-weight, 600);
+  color: var(--msg-sender-color, var(--color-text-primary));
+  /* A long "Name <address>" pair must wrap rather than push the column wider. */
+  overflow-wrap: anywhere;
+}
+
+.message-detail-from-address {
+  margin-left: 6px;
+  font-weight: 400;
+  color: var(--msg-meta-color, var(--color-text-secondary));
+}
+
+.message-detail-recipients {
+  font-size: var(--msg-meta-size, 12px);
+  color: var(--msg-meta-color, var(--color-text-secondary));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-detail-recipients > span + span {
+  margin-left: 8px;
+}
+
+.message-detail-contacts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  justify-content: var(--msg-header-align, start);
+}
+
+.message-detail-date {
+  font-size: var(--msg-meta-size, 12px);
+  color: var(--msg-meta-color, var(--color-text-secondary));
+}
+
+.message-detail-toolbar {
+  grid-area: bar;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  padding-left: var(--msg-toolbar-indent, 0);
+}
+
+/* Inline placement: the actions ride the sender line rather than floating in the
+   vertical middle of the identity block. */
+.message-detail-container[data-msg-toolbar="inline"] .message-detail-toolbar {
+  justify-self: end;
+  align-self: start;
+  margin-top: 1px;
+  padding-left: 0;
+}
+
+/* Sidebar placement: the stack hugs the rail's left edge. */
+.message-detail-container[data-msg-toolbar="sidebar"] .message-detail-toolbar {
+  justify-content: flex-start;
+}
+
+.message-detail-container[data-msg-align="center"] .message-detail-toolbar {
+  justify-self: center;
+  padding-left: 0;
+}
+
+.message-action-toolbar {
+  align-items: center;
+}
+
+.message-action-toolbar[data-orientation="vertical"] {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+/* Body: one column, or a details sidebar next to the reading column. */
+.message-detail-body-area {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.message-detail-container[data-msg-structure="stacked"] .message-detail-body-area {
+  flex-direction: column;
+}
+
+.message-detail-container[data-msg-structure="columns"] .message-detail-body-area {
+  display: grid;
+  grid-template-columns: minmax(200px, 244px) minmax(0, 1fr);
+}
+
+.message-detail-reading {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.message-body-scroll {
+  min-height: 0;
+}
+
+.message-detail-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--msg-page-padding, 16px);
+  background: var(--msg-header-background, transparent);
+  /* `--msg-divider` is a whole border shorthand, not a colour. */
+  border-right: var(--msg-divider, 1px solid var(--color-border));
+}
+
+/* Inside the sidebar the monogram is a block, not a grid cell. */
+.message-detail-aside .message-detail-avatar {
+  align-self: flex-start;
+}
+
+.message-detail-aside .message-detail-identity {
+  text-align: start;
+}
+
+.message-detail-aside .message-detail-contacts {
+  justify-content: flex-start;
+}
+
+/* The sidebar is narrow on purpose: the address goes on its own line and meta
+   lines wrap instead of truncating. */
+.message-detail-aside .message-detail-from-address {
+  display: block;
+  margin-left: 0;
+}
+
+.message-detail-aside .message-detail-recipients {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+/* ─── Attachments ────────────────────────────────────────── */
+
+.attachment-list {
+  padding: 12px var(--msg-page-padding, 16px);
+  /* `--msg-divider` is a whole border shorthand, not a colour. */
+  border-top: var(--msg-divider, 1px solid var(--color-border));
+  background: var(--color-bg);
+}
+
+/* The divider stays full-bleed, the contents line up with the reading column. */
+.attachment-list-inner {
+  width: 100%;
+  max-width: var(--msg-content-width, none);
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.attachment-list[data-variant="panel"] {
+  padding: 0;
+  border-top: none;
+  background: transparent;
+}
+
+.attachment-list[data-variant="panel"] .attachment-list-inner {
+  max-width: none;
+}
+
+.attachment-list-title {
+  margin-bottom: 8px;
+  font-size: var(--msg-label-size, 12px);
+  font-weight: var(--msg-label-weight, 600);
+  letter-spacing: var(--msg-label-spacing, 0.5px);
+  text-transform: var(--msg-label-transform, uppercase);
+  color: var(--msg-label-color, var(--color-text-secondary));
+}
+
+.attachment-list-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.attachment-list-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--color-bg-hover);
+  font-size: var(--msg-meta-size, 13px);
+}
+
+.attachment-list-icon {
+  color: var(--msg-meta-color, var(--color-text-secondary));
+}
+
+.attachment-list-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--msg-title-color, var(--color-text-primary));
+}
+
+.attachment-list-size {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--msg-meta-color, var(--color-text-secondary));
+}
+
+.attachment-list-progress {
+  min-width: 28px;
+  text-align: right;
+  font-size: 10px;
+  color: var(--msg-accent, var(--color-accent));
+}
+
+.attachment-list-download {
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  color: var(--msg-meta-color, var(--color-text-secondary));
+}
+
+.attachment-list-download:disabled {
+  cursor: default;
 }
 
 .message-list-row,

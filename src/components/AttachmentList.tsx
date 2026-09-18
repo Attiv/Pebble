@@ -9,6 +9,12 @@ import { useToastStore } from "@/stores/toast.store";
 
 interface Props {
   messageId: string;
+  /**
+   * `bar` is the full-width footer used by one-column themes; `panel` is the
+   * sidebar block used by two-column themes. Styling lives in the stylesheet so
+   * it can read the active theme's `--msg-*` variables.
+   */
+  variant?: "bar" | "panel";
 }
 
 function getMimeIcon(mimeType: string) {
@@ -35,7 +41,7 @@ function getErrorMessage(err: unknown): string | null {
   return null;
 }
 
-export default function AttachmentList({ messageId }: Props) {
+export default function AttachmentList({ messageId, variant = "bar" }: Props) {
   const { t } = useTranslation();
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -106,99 +112,48 @@ export default function AttachmentList({ messageId }: Props) {
   if (attachments.length === 0) return null;
 
   return (
-    <div
-      style={{
-        padding: "12px 16px",
-        borderTop: "1px solid var(--color-border)",
-        backgroundColor: "var(--color-bg)",
-      }}
-    >
-      <div
-        style={{
-          fontSize: "12px",
-          fontWeight: "600",
-          color: "var(--color-text-secondary)",
-          marginBottom: "8px",
-          textTransform: "uppercase",
-          letterSpacing: "0.5px",
-        }}
-      >
-        {t("attachments.title")} ({attachments.length})
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-        {attachments.map((attachment) => {
-          const Icon = getMimeIcon(attachment.mime_type);
-          const isDownloading = downloadingId === attachment.id;
+    <div className="attachment-list" data-variant={variant}>
+      <div className="attachment-list-inner">
+        <div className="attachment-list-title">
+          {t("attachments.title")} ({attachments.length})
+        </div>
+        <div className="attachment-list-items">
+          {attachments.map((attachment) => {
+            const Icon = getMimeIcon(attachment.mime_type);
+            const isDownloading = downloadingId === attachment.id;
 
-          return (
-            <div
-              key={attachment.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "6px 8px",
-                borderRadius: "6px",
-                backgroundColor: "var(--color-bg-hover)",
-                fontSize: "13px",
-              }}
-            >
-              <Icon size={16} color="var(--color-text-secondary)" style={{ flexShrink: 0 }} />
-              <span
-                style={{
-                  flex: 1,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                  color: "var(--color-text-primary)",
-                }}
-              >
-                {attachment.filename}
-              </span>
-              <span
-                style={{
-                  fontSize: "11px",
-                  color: "var(--color-text-secondary)",
-                  flexShrink: 0,
-                }}
-              >
-                {formatFileSize(attachment.size)}
-              </span>
-              <div style={{ display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
-                {isDownloading && downloadProgress[attachment.id] != null && (
-                  <span style={{ fontSize: "10px", color: "var(--color-accent)", minWidth: "28px", textAlign: "right" }}>
-                    {downloadProgress[attachment.id]}%
-                  </span>
-                )}
-                <button
-                  onClick={() => handleDownload(attachment)}
-                  disabled={isDownloading}
-                  aria-label={t("attachments.download") + ": " + attachment.filename}
-                  title={isDownloading ? t("attachments.downloading") : downloadedPaths[attachment.id] ? downloadedPaths[attachment.id] : t("attachments.download")}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    cursor: isDownloading ? "default" : "pointer",
-                    padding: "2px",
-                    borderRadius: "4px",
-                    color: "var(--color-text-secondary)",
-                    display: "flex",
-                    alignItems: "center",
-                    opacity: isDownloading ? 0.5 : 1,
-                  }}
-                >
-                  {isDownloading ? (
-                    <Loader size={14} className="spinner" />
-                  ) : downloadedPaths[attachment.id] ? (
-                    <Check size={14} style={{ color: "var(--color-accent)" }} />
-                  ) : (
-                    <Download size={14} />
+            return (
+              <div key={attachment.id} className="attachment-list-row">
+                <Icon size={16} className="attachment-list-icon" style={{ flexShrink: 0 }} />
+                <span className="attachment-list-name">{attachment.filename}</span>
+                <span className="attachment-list-size">{formatFileSize(attachment.size)}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
+                  {isDownloading && downloadProgress[attachment.id] != null && (
+                    <span className="attachment-list-progress">
+                      {downloadProgress[attachment.id]}%
+                    </span>
                   )}
-                </button>
+                  <button
+                    className="attachment-list-download"
+                    onClick={() => handleDownload(attachment)}
+                    disabled={isDownloading}
+                    aria-label={t("attachments.download") + ": " + attachment.filename}
+                    title={isDownloading ? t("attachments.downloading") : downloadedPaths[attachment.id] ? downloadedPaths[attachment.id] : t("attachments.download")}
+                    style={{ opacity: isDownloading ? 0.5 : 1 }}
+                  >
+                    {isDownloading ? (
+                      <Loader size={14} className="spinner" />
+                    ) : downloadedPaths[attachment.id] ? (
+                      <Check size={14} style={{ color: "var(--msg-accent, var(--color-accent))" }} />
+                    ) : (
+                      <Download size={14} />
+                    )}
+                  </button>
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );
