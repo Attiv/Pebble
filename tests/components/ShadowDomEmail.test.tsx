@@ -6,6 +6,7 @@ import { getMessageTheme } from "@/lib/messageThemes";
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
   openMailtoUrl: vi.fn(),
+  reapplyInlineStyles: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -16,10 +17,17 @@ vi.mock("@/app/useMailtoOpen", () => ({
   openMailtoUrl: mocks.openMailtoUrl,
 }));
 
+// Only the call site is swapped; the sanitizer itself stays real.
+vi.mock("@/lib/sanitizeHtml", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/sanitizeHtml")>();
+  return { ...actual, reapplyInlineStyles: mocks.reapplyInlineStyles };
+});
+
 describe("ShadowDomEmail", () => {
   beforeEach(() => {
     mocks.invoke.mockReset();
     mocks.openMailtoUrl.mockReset();
+    mocks.reapplyInlineStyles.mockReset();
     mocks.invoke.mockResolvedValue(undefined);
     mocks.openMailtoUrl.mockResolvedValue(true);
   });
@@ -113,9 +121,27 @@ describe("ShadowDomEmail", () => {
 
     const shadowMarkup = host!.shadowRoot!.innerHTML;
     expect(shadowMarkup).toContain('.pebble-email-content > table[height="100%"]');
+    // The attribute stays: the stylesheet matches on it. What makes the clamp
+    // actually reach the paint is the CSSOM copy check below.
     expect(shadowMarkup).toContain('style="height: 100%; background: #f1f1f1"');
     expect(shadowMarkup).toContain("height: auto !important");
     expect(shadowMarkup).toContain("min-height: 0 !important");
+  });
+
+  /// The mount is the only place that knows the message is about to be read
+  /// under the app's CSP, where a `style` attribute is refused. Declarations
+  /// that stay in the attribute alone therefore paint nothing at all — which is
+  /// how a marketing email lost its `display:none` overlay and its tile sizing.
+  it("re-applies the message's inline styles once it is in the shadow root", async () => {
+    const { container } = render(<ShadowDomEmail html={'<p style="color: red">Hello</p>'} />);
+    const host = container.firstChild as HTMLDivElement | null;
+
+    await waitFor(() => {
+      expect(host?.shadowRoot?.querySelector(".pebble-email-content")).not.toBeNull();
+    });
+
+    expect(mocks.reapplyInlineStyles).toHaveBeenCalled();
+    expect(mocks.reapplyInlineStyles.mock.calls[0][0]).toBe(host!.shadowRoot);
   });
 
   it("renders approved email CSS inside the shadow content", async () => {

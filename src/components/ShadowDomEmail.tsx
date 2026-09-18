@@ -1,7 +1,7 @@
 import { useRef, useLayoutEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openMailtoUrl } from "@/app/useMailtoOpen";
-import { sanitizeHtml } from "@/lib/sanitizeHtml";
+import { sanitizeHtml, reapplyInlineStyles } from "@/lib/sanitizeHtml";
 import { messageThemeContentCss, type MessageTheme } from "@/lib/messageThemes";
 import { SOURCE_ECHO_CSS } from "@/lib/sourceEcho";
 
@@ -153,6 +153,11 @@ export function ShadowDomEmail({ html, className, theme }: ShadowDomEmailProps) 
       ? `<div class="pebble-email-content">${safeHtml}</div>`
       : `<style>${css}</style>
       <div class="pebble-email-content">${safeHtml}</div>`;
+
+    // The message's own `style` attributes are refused by the same CSP that
+    // killed the `<style>` element, so what they carry has to be handed back
+    // through the CSSOM once the markup is in place.
+    reapplyInlineStyles(shadow);
 
     const handleClick = (event: Event) => {
       const target = event.target;

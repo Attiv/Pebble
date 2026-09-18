@@ -3,6 +3,9 @@ import DOMPurify from "dompurify";
 const SAFE_STYLE_PROPERTIES = new Set([
   "background",
   "background-color",
+  "background-position",
+  "background-repeat",
+  "background-size",
   "border",
   "border-bottom",
   "border-bottom-left-radius",
@@ -18,6 +21,7 @@ const SAFE_STYLE_PROPERTIES = new Set([
   "border-top-left-radius",
   "border-top-right-radius",
   "border-width",
+  "box-sizing",
   "color",
   "display",
   "font",
@@ -36,6 +40,7 @@ const SAFE_STYLE_PROPERTIES = new Set([
   "max-width",
   "min-height",
   "min-width",
+  "object-fit",
   "opacity",
   "overflow",
   "overflow-x",
@@ -45,6 +50,7 @@ const SAFE_STYLE_PROPERTIES = new Set([
   "padding-left",
   "padding-right",
   "padding-top",
+  "table-layout",
   "text-align",
   "text-decoration",
   "vertical-align",
@@ -74,20 +80,61 @@ function isSafeBackgroundShorthandValue(value: string): boolean {
   return /^[a-z]+$/.test(normalized);
 }
 
+interface SafeStyleDeclaration {
+  name: string;
+  value: string;
+  important: boolean;
+  /** The declaration as the sender wrote it, for the attribute form. */
+  text: string;
+}
+
+/**
+ * The declarations in a `style` attribute that may be applied, in order.
+ *
+ * Two carriers need this list — the attribute form that goes back into the
+ * markup, and the CSSOM form `reapplyInlineStyles` writes — so the rule about
+ * what is safe to apply lives here once.
+ */
+function parseSafeStyleDeclarations(style: string): SafeStyleDeclaration[] {
+  const declarations: SafeStyleDeclaration[] = [];
+
+  for (const part of style.split(";")) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+
+    const [rawName, ...rawValue] = trimmed.split(":");
+    const name = rawName.trim().toLowerCase();
+    const value = rawValue.join(":").trim();
+    if (!name || !value) continue;
+    if (!SAFE_STYLE_PROPERTIES.has(name)) continue;
+
+    const important = /\s*!important\s*$/i.test(value);
+    const bare = important ? value.replace(/\s*!important\s*$/i, "").trim() : value;
+    if (!bare) continue;
+
+    const normalized = bare.toLowerCase();
+    if (name === "background") {
+      if (!isSafeBackgroundShorthandValue(normalized)) continue;
+    } else {
+      if (normalized.includes("\\")) continue;
+      if (
+        /(url\s*\(|expression\s*\(|javascript:|vbscript:|data:|@import)/i.test(
+          normalized,
+        )
+      ) {
+        continue;
+      }
+    }
+
+    declarations.push({ name, value: bare, important, text: trimmed });
+  }
+
+  return declarations;
+}
+
 function filterStyleAttribute(style: string): string {
-  return style
-    .split(";")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .filter((part) => {
-      const [rawName, ...rawValue] = part.split(":");
-      const name = rawName.trim().toLowerCase();
-      const value = rawValue.join(":").trim().toLowerCase();
-      if (!SAFE_STYLE_PROPERTIES.has(name) || !value) return false;
-      if (name === "background") return isSafeBackgroundShorthandValue(value);
-      if (value.includes("\\")) return false;
-      return !/(url\s*\(|expression\s*\(|javascript:|vbscript:|data:|@import)/i.test(value);
-    })
+  return parseSafeStyleDeclarations(style)
+    .map((declaration) => declaration.text)
     .join("; ");
 }
 
@@ -103,6 +150,44 @@ function filterInlineStyles(html: string): string {
     }
   });
   return template.innerHTML;
+}
+
+/**
+ * Give the message its own `style` attributes back, through the CSSOM.
+ *
+ * Tauri appends a nonce to `style-src` when it builds the app, and under CSP3 a
+ * nonce makes `'unsafe-inline'` inert. `style-src-attr` carries no value of its
+ * own, so it inherits that dead `'unsafe-inline'` from `style-src`, and every
+ * `style` attribute in the message is refused. The webview keeps the attribute
+ * text and only declines to apply it, which is why a broken message looks
+ * *mis-laid-out* rather than unstyled: sizes and colours vanish, and the
+ * `display:none` that hides Outlook-only fallbacks stops hiding anything.
+ *
+ * Writing the same declarations through `CSSStyleDeclaration.setProperty` is a
+ * CSSOM write; no CSP directive covers it. So the attribute is read, filtered by
+ * exactly the rules the attribute form uses, and re-applied from script.
+ *
+ * The attribute is deliberately left in place: the shadow stylesheet matches on
+ * it (`table[style*="height:100%"]` and friends), and where a policy does let
+ * the attribute through the two carriers hold the same declarations, so
+ * applying both changes nothing.
+ *
+ * Returns the number of declarations handed to the CSSOM.
+ */
+export function reapplyInlineStyles(root: ParentNode): number {
+  let applied = 0;
+
+  root.querySelectorAll<HTMLElement>("[style]").forEach((element) => {
+    const raw = element.getAttribute("style");
+    if (!raw) return;
+
+    for (const { name, value, important } of parseSafeStyleDeclarations(raw)) {
+      element.style.setProperty(name, value, important ? "important" : "");
+      applied += 1;
+    }
+  });
+
+  return applied;
 }
 
 function normalizeLinkAttributes(html: string): string {

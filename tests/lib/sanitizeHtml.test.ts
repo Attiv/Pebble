@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeHtml } from "../../src/lib/sanitizeHtml";
+import { sanitizeHtml, reapplyInlineStyles } from "../../src/lib/sanitizeHtml";
 
 describe("sanitizeHtml", () => {
   it("preserves safe inline email styles", () => {
@@ -139,5 +139,109 @@ describe("sanitizeHtml", () => {
     expect(sanitized).toContain('rel="noopener noreferrer"');
     expect(sanitized).not.toContain("_top");
     expect(sanitized).not.toContain('rel="opener"');
+  });
+
+  /// A marketing grid sizes its cells with `table-layout`, and covers its
+  /// thumbnails with `background-size`/`object-fit` off the cell's `background`
+  /// attribute. Dropping those four families collapsed the grid.
+  it("preserves the layout properties an email grid is built from", () => {
+    const sanitized = sanitizeHtml(
+      '<table style="table-layout:fixed"><tbody><tr>' +
+        '<td background="https://i.pinimg.com/400x300/a.jpg" style="background-size:cover;background-position:50%;background-repeat:no-repeat">' +
+        '<img src="https://i.pinimg.com/400x300/a.jpg" style="object-fit:cover;box-sizing:border-box">' +
+        "</td></tr></tbody></table>",
+    );
+
+    expect(sanitized).toContain("table-layout:fixed");
+    expect(sanitized).toContain("background-size:cover");
+    expect(sanitized).toContain("background-position:50%");
+    expect(sanitized).toContain("background-repeat:no-repeat");
+    expect(sanitized).toContain("object-fit:cover");
+    expect(sanitized).toContain("box-sizing:border-box");
+  });
+});
+
+describe("reapplyInlineStyles", () => {
+  /// Under the app's CSP the webview keeps the `style` attribute's text but
+  /// applies none of it, so the element's CSSOM starts empty. jsdom has no such
+  /// policy — it parses the attribute eagerly, which would make any assertion on
+  /// `element.style` pass for free. This hands the element a CSSOM that starts
+  /// empty and records what gets written into it instead.
+  function blindedCssom(element: Element): Record<string, string> {
+    const written: Record<string, string> = {};
+    Object.defineProperty(element, "style", {
+      configurable: true,
+      value: {
+        setProperty(name: string, value: string, priority = "") {
+          written[`${name}|${priority}`] = value;
+        },
+      },
+    });
+    return written;
+  }
+
+  it("hands every surviving declaration to the CSSOM", () => {
+    const host = document.createElement("div");
+    host.innerHTML = '<p style="color: red; text-align: center; margin: 8px">Hello</p>';
+    const written = blindedCssom(host.querySelector("p")!);
+
+    expect(reapplyInlineStyles(host)).toBe(3);
+    expect(written).toEqual({
+      "color|": "red",
+      "text-align|": "center",
+      "margin|": "8px",
+    });
+  });
+
+  it("carries !important, which is how a message hides its Outlook fallbacks", () => {
+    const host = document.createElement("div");
+    host.innerHTML =
+      '<div style="display:none !important"><span>Outlook-only overlay</span></div>';
+    const written = blindedCssom(host.querySelector("div")!);
+
+    reapplyInlineStyles(host);
+
+    expect(written["display|important"]).toBe("none");
+  });
+
+  it("keeps the attribute, which the shadow stylesheet matches on", () => {
+    const host = document.createElement("div");
+    host.innerHTML = '<table style="height: 100%; background: #f1f1f1"></table>';
+
+    reapplyInlineStyles(host);
+
+    // `table[style*="height:100%"]` in the shadow stylesheet still has to see it.
+    expect(host.querySelector("table")!.getAttribute("style")).toContain("height");
+  });
+
+  it("draws the line in the same place the attribute form does", () => {
+    const host = document.createElement("div");
+    host.innerHTML =
+      '<p style="background: url(https://evil.example/track); color: blue">x</p>';
+    const written = blindedCssom(host.querySelector("p")!);
+
+    reapplyInlineStyles(host);
+
+    expect(written).toEqual({ "color|": "blue" });
+  });
+
+  it("writes nothing for an element with nothing safe in it", () => {
+    const host = document.createElement("div");
+    host.innerHTML =
+      '<p style="behavior: url(#default#time2); -moz-binding: url(x)">x</p>';
+    const written = blindedCssom(host.querySelector("p")!);
+
+    expect(reapplyInlineStyles(host)).toBe(0);
+    expect(written).toEqual({});
+  });
+
+  it("reaches the message inside a shadow root", () => {
+    const host = document.createElement("div");
+    const shadow = host.attachShadow({ mode: "open" });
+    shadow.innerHTML = '<div style="background-size:cover;object-fit:cover">cell</div>';
+    const written = blindedCssom(shadow.querySelector("div")!);
+
+    expect(reapplyInlineStyles(shadow)).toBe(2);
+    expect(written).toEqual({ "background-size|": "cover", "object-fit|": "cover" });
   });
 });
