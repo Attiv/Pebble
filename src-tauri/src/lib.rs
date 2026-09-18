@@ -6,6 +6,7 @@ mod profile;
 mod realtime;
 mod snooze_watcher;
 mod state;
+mod window_state;
 
 use serde::Serialize;
 use state::AppState;
@@ -296,6 +297,16 @@ pub fn run() {
                     api.prevent_close();
                     let _ = window.hide();
                 }
+                // Moving or resizing the window is the whole signal that the
+                // remembered place is out of date. The geometry is read back
+                // here rather than taken from the event, so a burst of events
+                // from one drag collapses to the position it ended at.
+                WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
+                    if let Some(state) = window.app_handle().try_state::<window_state::WindowState>()
+                    {
+                        state.record(window);
+                    }
+                }
                 _ => {}
             }
         })
@@ -354,6 +365,19 @@ pub fn run() {
                 let _ = window
                     .set_background_color(Some(tauri::window::Color(0xf8, 0xf7, 0xf5, 0xff)));
             }
+            // Where the window was, and where it should remember being from
+            // now on. Restoring is done on a hidden window on purpose: the
+            // frontend shows it only once the UI has mounted, so the place it
+            // appears in is the first place it is seen in.
+            let window_state = window_state::watch(&app_data);
+            // `Manager` exposes the webview window, and this module only deals
+            // with the window half of it.
+            if let Some(webview_window) = app.get_webview_window("main") {
+                let window: tauri::Window<_> = webview_window.as_ref().window();
+                window_state::restore(&window, window_state.path());
+            }
+            app.manage(window_state);
+
             app.manage(PendingMailtoUrls::default());
             // Owns the applied-count bookkeeping for the icon badge.
             app.manage(badge::UnreadBadgeState::new());
@@ -669,6 +693,19 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
+            // The window geometry is written a moment after the window stops
+            // moving, which is the right trade while the app is running and the
+            // wrong one on the way out: whatever is still pending would die with
+            // the process. So the last move is written here instead.
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
+                if let Some(state) = app_handle.try_state::<window_state::WindowState>() {
+                    state.flush();
+                }
+            }
+
             // On macOS a Dock-icon click is routed to `applicationShouldHandleReopen`,
             // which tao forwards as `RunEvent::Reopen`. The `Builder::run(context)`
             // shorthand installs a no-op callback (`run(|_, _| {})`) and tao returns
