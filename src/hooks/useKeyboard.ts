@@ -10,6 +10,7 @@ import { updateMessageFlags, archiveMessage, getMessage } from "@/lib/api";
 import { queryClient } from "@/lib/query-client";
 import type { MessageSummary, ThreadSummary } from "@/lib/api";
 import { patchMessagesCache, readFirstCachedMessages } from "@/hooks/queries";
+import { CLOSE_MESSAGE_DETAIL_EVENT } from "@/hooks/useCloseMessageDetail";
 import i18n from "@/lib/i18n";
 
 function eventToKeyString(e: KeyboardEvent): string {
@@ -47,6 +48,18 @@ async function confirmLeaveCompose(): Promise<boolean> {
     message: i18n.t("compose.discardDraftConfirm", "You have an unsaved draft. Discard and leave?"),
     destructive: true,
   });
+}
+
+/**
+ * Ask whichever view is showing a message to close its detail panel.
+ *
+ * Returns whether anything answered, so the caller can fall through to the
+ * next thing Escape means in the current view.
+ */
+function closeOpenMessageDetail(): boolean {
+  const request = new CustomEvent(CLOSE_MESSAGE_DETAIL_EVENT, { cancelable: true });
+  document.dispatchEvent(request);
+  return request.defaultPrevented;
 }
 
 function navigateAfterComposeConfirm(view: ActiveView) {
@@ -117,15 +130,33 @@ export function useKeyboard() {
 
       // Execute action
       switch (actionId) {
-        case "close-modal":
+        case "close-modal": {
           if (useCommandStore.getState().isOpen) {
             useCommandStore.getState().close();
-          } else if (useUIStore.getState().activeView === "compose") {
+            break;
+          }
+
+          // A dialog or popover owns Escape while it is open: each carries its
+          // own handler (ConfirmDialog, the settings dialogs, the message
+          // detail's popovers via `useClickOutside`). Closing the message
+          // behind one of them would take two layers off on a single keystroke.
+          if (document.querySelector('[role="dialog"], [data-pebble-overlay]')) break;
+
+          const ui = useUIStore.getState();
+
+          if (ui.activeView === "compose") {
             confirmLeaveCompose().then((ok) => { if (ok) closeComposeAfterConfirm(); });
-          } else if (useUIStore.getState().activeView === "search") {
-            useUIStore.getState().setActiveView("inbox");
+            break;
+          }
+
+          // One keystroke, one layer: an open message goes before the view does.
+          if (closeOpenMessageDetail()) break;
+
+          if (ui.activeView === "search") {
+            ui.setActiveView("inbox");
           }
           break;
+        }
         case "toggle-view-inbox":
           confirmLeaveCompose().then((ok) => { if (ok) navigateAfterComposeConfirm("inbox"); });
           break;

@@ -7,6 +7,7 @@ import { useMailStore } from "@/stores/mail.store";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import MessageItem from "@/components/MessageItem";
 import MessageDetail from "@/components/MessageDetail";
+import { useCloseMessageDetail } from "@/hooks/useCloseMessageDetail";
 
 const EMPTY_REMOVED_IDS = new Set<string>();
 
@@ -21,6 +22,8 @@ export default function StarredView() {
   const scopedSelectedId = accountStateMatches ? selectedId : null;
   const { data: messages, loading, error, hasNextPage, isFetchingNextPage, fetchNextPage, refetch } =
     useStarredMessagesQuery(activeAccountId, scopedRemovedIds.size);
+
+  useCloseMessageDetail(scopedSelectedId !== null, () => setSelectedId(null));
 
   useEffect(() => {
     if (stateAccountId === activeAccountId) return;

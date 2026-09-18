@@ -10,6 +10,7 @@ import { useMailStore } from "@/stores/mail.store";
 import SearchFilters from "./SearchFilters";
 import SearchResultItem from "./SearchResultItem";
 import MessageDetail from "@/components/MessageDetail";
+import { useCloseMessageDetail } from "@/hooks/useCloseMessageDetail";
 
 const emptyFilters: AdvancedSearchQuery = {};
 
@@ -38,6 +39,8 @@ export default function SearchView() {
   const trimmed = query.trim();
   const filtersActive = hasActiveFilters(filters);
   const searchEnabled = hasSearched && (trimmed.length > 0 || filtersActive);
+
+  useCloseMessageDetail(selectedId !== null, () => setSelectedId(null));
 
   const { data: results = [], isLoading: loading, error: queryError, refetch } = useQuery({
     // `activeAccountId` belongs in the key: switching accounts in the sidebar

@@ -18,6 +18,7 @@ import { emptyTrash, triggerSync } from "@/lib/api";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import { folderIdsForSelection, roleForSelection } from "@/lib/folderAggregation";
 import { accountBadges, type AccountBadgeInfo } from "@/lib/accountIdentity";
+import { useCloseMessageDetail } from "@/hooks/useCloseMessageDetail";
 import type { ThreadSummary } from "@/lib/api";
 
 const EMPTY_THREADS: ThreadSummary[] = [];
@@ -102,6 +103,12 @@ export default function InboxView() {
   }, [queryClient]);
 
   const detailOpen = threadView ? selectedThreadId !== null : selectedMessageId !== null;
+
+  // Escape closes whatever this view has open — a thread or a single message.
+  useCloseMessageDetail(detailOpen, () => {
+    if (threadView) setSelectedThreadId(null);
+    else setSelectedMessage(null);
+  });
 
   const emptyStateStyle: React.CSSProperties = {
     display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
