@@ -244,4 +244,46 @@ describe("reapplyInlineStyles", () => {
     expect(reapplyInlineStyles(shadow)).toBe(2);
     expect(written).toEqual({ "background-size|": "cover", "object-fit|": "cover" });
   });
+
+  /// The shape a Pinterest breakdown actually arrived in, trimmed to the parts
+  /// that failed: a table pixel-sized by `table-layout`, a thumbnail cell that
+  /// covers itself with `background-size`, and — the visible symptom — a white
+  /// label the desktop path hides with `display:none`. Every one of those is an
+  /// attribute declaration, so every one of them was refused at once; the label
+  /// reappeared over each tile and, `color:#ffffff` gone too, took the shadow
+  /// root's link colour with it.
+  it("carries a marketing tile all the way through to the CSSOM", () => {
+    const host = document.createElement("div");
+    const shadow = host.attachShadow({ mode: "open" });
+    shadow.innerHTML = sanitizeHtml(
+      '<table style="table-layout:fixed"><tbody><tr>' +
+        '<td style="background-size:cover;border-radius:16px">' +
+        '<img src="https://i.pinimg.com/400x300/a.jpg" style="object-fit:cover">' +
+        "</td></tr></tbody></table>" +
+        '<div style="display:none"><span style="color:#ffffff">端午節</span></div>',
+    );
+
+    const written: Record<string, string> = {};
+    shadow.querySelectorAll<HTMLElement>("[style]").forEach((element, index) => {
+      Object.defineProperty(element, "style", {
+        configurable: true,
+        value: {
+          setProperty: (name: string, value: string) => {
+            written[`${index}:${name}`] = value;
+          },
+        },
+      });
+    });
+
+    reapplyInlineStyles(shadow);
+
+    expect(written).toEqual({
+      "0:table-layout": "fixed",
+      "1:background-size": "cover",
+      "1:border-radius": "16px",
+      "2:object-fit": "cover",
+      "3:display": "none",
+      "4:color": "#ffffff",
+    });
+  });
 });
