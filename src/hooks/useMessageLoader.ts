@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { getMessageWithHtml, getRenderedHtml } from "@/lib/api";
 import { useUpdateFlagsMutation } from "@/hooks/mutations/useUpdateFlagsMutation";
+import { findCachedMessage } from "@/hooks/queries";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import type { Message, RenderedHtml, PrivacyMode } from "@/lib/api";
 
 export function useMessageLoader(messageId: string | null, privacyMode: PrivacyMode) {
+  const queryClient = useQueryClient();
   const flagsMutation = useUpdateFlagsMutation();
   const [message, setMessage] = useState<Message | null>(null);
   const [rendered, setRendered] = useState<RenderedHtml | null>(null);
@@ -33,6 +36,18 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
     let cancelled = false;
     const initialPrivacyMode = privacyModeRef.current;
     const initialRenderKey = renderKey(messageId, initialPrivacyMode);
+    const cachedMessage = findCachedMessage(queryClient, (item) => item.id === messageId);
+    const markedReadImmediately = !!cachedMessage && !cachedMessage.is_read;
+
+    if (markedReadImmediately) {
+      flagsMutation.mutate({
+        messageId,
+        isRead: true,
+        accountId: cachedMessage.account_id,
+        previousIsRead: false,
+      });
+    }
+
     setLoading(true);
     setMessage(null);
     setRendered(null);
@@ -48,8 +63,13 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
         renderedKeyRef.current = initialRenderKey;
         setRendered({ ...html, html: sanitizeHtml(html.html) });
 
-        if (!cancelled && !msg.is_read) {
-          flagsMutation.mutate({ messageId: messageId!, isRead: true });
+        if (!cancelled && !markedReadImmediately && !msg.is_read) {
+          flagsMutation.mutate({
+            messageId: messageId!,
+            isRead: true,
+            accountId: msg.account_id,
+            previousIsRead: false,
+          });
         }
       } catch (err) {
         if (!cancelled) {

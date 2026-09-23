@@ -6,16 +6,20 @@ import {
   snapshotMessagesCache,
   restoreMessagesCache,
 } from "@/hooks/queries";
+import { accountUnreadCountsQueryKey } from "@/hooks/queries/useAccountUnreadCounts";
 
 interface UpdateFlagsParams {
   messageId: string;
   isRead?: boolean;
   isStarred?: boolean;
+  accountId?: string;
+  previousIsRead?: boolean;
 }
 
 interface MutationContext {
   previousMessage: Message | null | undefined;
   previousLists: ReturnType<typeof snapshotMessagesCache>;
+  previousAccountCounts: Record<string, number> | undefined;
 }
 
 export function useUpdateFlagsMutation() {
@@ -36,6 +40,29 @@ export function useUpdateFlagsMutation() {
       ]);
 
       const previousLists = snapshotMessagesCache(queryClient);
+      const previousAccountCounts = queryClient.getQueryData<Record<string, number>>(
+        accountUnreadCountsQueryKey,
+      );
+
+      if (
+        params.isRead !== undefined &&
+        params.accountId &&
+        params.previousIsRead !== undefined &&
+        params.previousIsRead !== params.isRead
+      ) {
+        const delta = params.isRead ? -1 : 1;
+        queryClient.setQueryData<Record<string, number>>(
+          accountUnreadCountsQueryKey,
+          (counts) => {
+            if (!counts) return counts;
+            const nextCount = Math.max(0, (counts[params.accountId!] ?? 0) + delta);
+            const next = { ...counts };
+            if (nextCount === 0) delete next[params.accountId!];
+            else next[params.accountId!] = nextCount;
+            return next;
+          },
+        );
+      }
 
       if (previousMessage) {
         queryClient.setQueryData<Message | null>(
@@ -62,7 +89,7 @@ export function useUpdateFlagsMutation() {
         ),
       );
 
-      return { previousMessage, previousLists };
+      return { previousMessage, previousLists, previousAccountCounts };
     },
     onError: (_err, params, context) => {
       if (context?.previousMessage) {
@@ -74,14 +101,18 @@ export function useUpdateFlagsMutation() {
       if (context?.previousLists) {
         restoreMessagesCache(queryClient, context.previousLists);
       }
+      if (context?.previousAccountCounts) {
+        queryClient.setQueryData(accountUnreadCountsQueryKey, context.previousAccountCounts);
+      }
     },
-    onSettled: (_data, err, params) => {
+    onSettled: (_data, _err, params) => {
       queryClient.invalidateQueries({ queryKey: ["messages"] });
       queryClient.invalidateQueries({ queryKey: ["threads"] });
       queryClient.invalidateQueries({ queryKey: ["starred-messages"] });
       queryClient.invalidateQueries({ queryKey: ["message", params.messageId] });
-      if (!err && params.isRead !== undefined) {
+      if (params.isRead !== undefined) {
         queryClient.invalidateQueries({ queryKey: ["folder-unread-counts"] });
+        queryClient.invalidateQueries({ queryKey: accountUnreadCountsQueryKey });
       }
     },
   });
