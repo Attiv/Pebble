@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { sanitizeHtml, reapplyInlineStyles } from "../../src/lib/sanitizeHtml";
 
 describe("sanitizeHtml", () => {
+  it("preserves embedded PNG image sources through repeated sanitization", () => {
+    const source = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=";
+    const html = "<img width=200 src=" + source + ">";
+    expect(sanitizeHtml(sanitizeHtml(html))).toContain(source);
+  });
+
   it("preserves safe inline email styles", () => {
     const sanitized = sanitizeHtml(
       '<p style="color: red; text-align: center; margin: 8px">Hello</p>',

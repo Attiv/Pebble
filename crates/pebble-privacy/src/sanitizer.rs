@@ -722,9 +722,9 @@ fn build_sanitizer(mode: &PrivacyMode) -> Builder<'static> {
             .collect::<HashSet<_>>(),
     );
 
-    // Only allow safe URL schemes (blocks javascript:, data:, vbscript:, etc.)
+    // Data URLs are restricted to raster image sources by the attribute filter.
     builder.url_schemes(
-        ["http", "https", "mailto"]
+        ["http", "https", "mailto", "data"]
             .iter()
             .copied()
             .collect::<HashSet<_>>(),
@@ -734,7 +734,25 @@ fn build_sanitizer(mode: &PrivacyMode) -> Builder<'static> {
     builder.link_rel(Some("noopener noreferrer"));
 
     // Filter style attributes using a CSS property allowlist
-    builder.attribute_filter(|_element, attribute, value| {
+    builder.attribute_filter(|element, attribute, value| {
+        let scheme = value.split_once(":").map(|(scheme, _)| {
+            scheme
+                .chars()
+                .filter(|character| {
+                    !character.is_ascii_whitespace() && !character.is_ascii_control()
+                })
+                .collect::<String>()
+        });
+        if scheme
+            .as_deref()
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("data"))
+        {
+            return if element == "img" && attribute == "src" && is_raster_data_image(value) {
+                Some(value.trim().into())
+            } else {
+                None
+            };
+        }
         if attribute == "style" {
             let filtered = filter_css_properties(value);
             if filtered.is_empty() {
@@ -819,6 +837,27 @@ fn rewrite_style_tag_contents(html: &str, rewrite: fn(&str) -> String) -> String
 /// Uses lol_html (a streaming HTML rewriter) to parse `<img>` elements
 /// properly, avoiding the pitfalls of hand-rolled string scanning (attribute
 /// quoting, whitespace variations, encoding tricks).
+fn is_raster_data_image(value: &str) -> bool {
+    let Some((header, payload)) = value.trim().split_once(",") else {
+        return false;
+    };
+    let allowed = [
+        "data:image/png;base64",
+        "data:image/jpeg;base64",
+        "data:image/gif;base64",
+        "data:image/webp;base64",
+    ]
+    .iter()
+    .any(|allowed| header.eq_ignore_ascii_case(allowed));
+    allowed
+        && !payload.trim().is_empty()
+        && payload.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(byte, 43 | 47 | 61)
+                || byte.is_ascii_whitespace()
+        })
+}
+
 fn preprocess_images(
     html: &str,
     mode: &PrivacyMode,
@@ -1198,6 +1237,48 @@ fn next_char_index(text: &str, index: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_preserves_inline_png_in_all_privacy_modes() {
+        let source = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=";
+        for mode in [
+            PrivacyMode::Strict,
+            PrivacyMode::LoadOnce,
+            PrivacyMode::Off,
+            PrivacyMode::TrustedSender("sender@example.com".into()),
+        ] {
+            let html = format!(r#"<img width="200" src="{source}">"#);
+            let result = PrivacyGuard::new().render_message_html(&html, "", &mode);
+            assert!(result.html.contains(source));
+            assert_eq!(result.images_blocked, 0);
+            assert!(result.trackers_blocked.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_rejects_unsafe_data_image_sources() {
+        for source in [
+            "data:text/html;base64,PHNjcmlwdD4=",
+            "data:image/svg+xml;base64,PHN2Zz4=",
+            "data:image/png,not-base64",
+            "data:image/png;base64,",
+            "data:image/png;base64,<>",
+        ] {
+            for mode in [PrivacyMode::Strict, PrivacyMode::Off] {
+                let html = format!(r#"<img src="{source}">"#);
+                let result = PrivacyGuard::new().render_safe_html(&html, &mode);
+                assert!(!result.html.contains("src="), "{}", result.html);
+            }
+        }
+    }
+
+    #[test]
+    fn test_rejects_data_urls_outside_image_sources() {
+        let html = r#"<a href="data:image/png;base64,aGVsbG8=">Open</a><blockquote cite="DATA:text/html;base64,aGVsbG8=">Quote</blockquote>"#;
+        let result = PrivacyGuard::new().render_safe_html(html, &PrivacyMode::Off);
+        assert!(!result.html.contains("href="));
+        assert!(!result.html.contains("cite="));
+    }
 
     #[test]
     fn test_removes_script_tags() {
