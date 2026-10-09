@@ -167,6 +167,9 @@
     "themeSystemDesc": "Follows your OS setting",
     "messageTheme": "Message theme",
     "messageThemeDesc": "Visual template for the message detail view. Also switchable from the palette icon inside a message.",
+    "motion": "Motion",
+    "enableAnimations": "Enable interface animations",
+    "enableAnimationsDesc": "Animate occasional transitions and feedback. Disabled motion changes state instantly.",
     "backgroundImage": "Background image",
     "backgroundImageDesc": "Stored locally in Pebble's app data folder.",
     "noBackgroundImage": "No background image",
@@ -835,6 +838,13 @@
     "createRuleFromSelection": "Create rule from selected text",
     "addToKanbanNoteLabel": "Add to Kanban note",
     "addToKanbanNote": "Add selected text as kanban note"
+  },
+  "linkActions": {
+    "label": "Link actions",
+    "copy": "Copy link",
+    "copied": "Link copied",
+    "copyFailed": "Could not copy the link",
+    "open": "Open link"
   },
   "titleBar": {
     "minimize": "Minimize",

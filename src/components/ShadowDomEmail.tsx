@@ -1,9 +1,15 @@
 import { useRef, useLayoutEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { openMailtoUrl } from "@/app/useMailtoOpen";
 import { sanitizeHtml, reapplyInlineStyles } from "@/lib/sanitizeHtml";
 import { messageThemeContentCss, type MessageTheme } from "@/lib/messageThemes";
+import { isSupportedLink, openMessageLink } from "@/lib/openMessageLink";
 import { SOURCE_ECHO_CSS } from "@/lib/sourceEcho";
+
+/** Where the reader right-clicked a link, and which address it carried. */
+export interface MessageLinkContextMenuRequest {
+  href: string;
+  x: number;
+  y: number;
+}
 
 interface ShadowDomEmailProps {
   html: string;
@@ -14,6 +20,12 @@ interface ShadowDomEmailProps {
    * sanitizer and the link handling are untouched by it.
    */
   theme?: MessageTheme | null;
+  /**
+   * Right click on a link inside the body. The menu raised for it lives
+   * outside the shadow root, so the component only reports where the click
+   * landed and on which address.
+   */
+  onLinkContextMenu?: (link: MessageLinkContextMenuRequest) => void;
 }
 
 /**
@@ -315,8 +327,15 @@ export function prepareEmailImages(root: ParentNode): () => void {
   return () => cleanups.forEach((cleanup) => cleanup());
 }
 
-export function ShadowDomEmail({ html, className, theme }: ShadowDomEmailProps) {
+export function ShadowDomEmail({
+  html,
+  className,
+  theme,
+  onLinkContextMenu,
+}: ShadowDomEmailProps) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const onLinkContextMenuRef = useRef(onLinkContextMenu);
+  onLinkContextMenuRef.current = onLinkContextMenu;
 
   // The shadow body must be ready before paint; otherwise the reader can flash
   // from the fallback text into the sanitized HTML a frame later.
@@ -346,25 +365,42 @@ export function ShadowDomEmail({ html, className, theme }: ShadowDomEmailProps) 
 
       const anchor = target.closest<HTMLAnchorElement>("a[href]");
       const href = anchor?.getAttribute("href")?.trim();
+      if (!href || !isSupportedLink(href)) return;
+
+      event.preventDefault();
+      void openMessageLink(href)
+        .catch((err) => console.warn("Failed to open email body link", err));
+    };
+
+    // A link rendered inside this shadow root gets no "copy link" entry
+    // from the webview — the native menu is not raised for it — so the
+    // address had no way out of the app. The menu is announced from here,
+    // where the real anchor is still readable as the event target.
+    const handleContextMenu = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+
+      const anchor = target.closest<HTMLAnchorElement>("a[href]");
+      const href = anchor?.getAttribute("href")?.trim();
       if (!href) return;
 
-      if (/^mailto:/i.test(href)) {
-        event.preventDefault();
-        void openMailtoUrl(href);
-        return;
-      }
+      const handler = onLinkContextMenuRef.current;
+      if (!handler) return;
 
-      if (/^https?:\/\//i.test(href)) {
-        event.preventDefault();
-        void invoke("open_external_url", { url: href })
-          .catch((err) => console.warn("Failed to open email body link", err));
-      }
+      const mouse = event as MouseEvent;
+      event.preventDefault();
+      // A selection that happens to cover the link must not also raise the
+      // selected-text menu underneath this one.
+      event.stopPropagation();
+      handler({ href, x: mouse.clientX, y: mouse.clientY });
     };
 
     shadow.addEventListener("click", handleClick);
+    shadow.addEventListener("contextmenu", handleContextMenu);
     return () => {
       cleanupImages();
       shadow.removeEventListener("click", handleClick);
+      shadow.removeEventListener("contextmenu", handleContextMenu);
     };
   }, [html, theme]);
 

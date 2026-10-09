@@ -8,7 +8,7 @@ import { MessageDetailSkeleton } from "./Skeleton";
 import PrivacyBanner from "./PrivacyBanner";
 import AttachmentList from "./AttachmentList";
 import SnoozePopover from "../features/inbox/SnoozePopover";
-import { ShadowDomEmail } from "./ShadowDomEmail";
+import { ShadowDomEmail, type MessageLinkContextMenuRequest } from "./ShadowDomEmail";
 import TranslatePopover from "../features/translate/TranslatePopover";
 import BilingualView from "../features/translate/BilingualView";
 import AiSummaryCard from "../features/ai/AiSummaryCard";
@@ -18,11 +18,13 @@ import { useBilingualTranslation } from "@/hooks/useBilingualTranslation";
 import type { BilingualError } from "@/hooks/useBilingualTranslation";
 import { defaultPrivacyMode } from "@/lib/privacyMode";
 import { getMessageTheme, messageThemeVariables, resolveMessageTheme, senderInitials } from "@/lib/messageThemes";
+import { openMessageLink } from "@/lib/openMessageLink";
 import { useResolvedAppTheme } from "@/hooks/useResolvedAppTheme";
 import { useKanbanStore } from "@/stores/kanban.store";
 import { useToastStore } from "@/stores/toast.store";
 import { useUIStore } from "@/stores/ui.store";
 import SelectionActionPopover from "./SelectionActionPopover";
+import LinkActionPopover from "./LinkActionPopover";
 import MessageThemePicker from "./MessageThemePicker";
 import type { EmailAddress } from "@/lib/api";
 import ContactAddressAction from "./ContactAddressAction";
@@ -75,12 +77,14 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
     : defaultPrivacyMode();
   const [showSnooze, setShowSnooze] = useState(false);
   const [showSelectionActions, setShowSelectionActions] = useState<{ text: string; position: { x: number; y: number } } | null>(null);
+  const [showLinkActions, setShowLinkActions] = useState<{ href: string; position: { x: number; y: number } } | null>(null);
   const [showTranslate, setShowTranslate] = useState<{ text: string; position: { x: number; y: number } } | null>(null);
   const [showAiSummary, setShowAiSummary] = useState(false);
   const [showThemePicker, setShowThemePicker] = useState(false);
 
   const snoozeRef = useRef<HTMLDivElement>(null);
   const selectionActionsRef = useRef<HTMLDivElement>(null);
+  const linkActionsRef = useRef<HTMLDivElement>(null);
   const translateRef = useRef<HTMLDivElement>(null);
   const themePickerRef = useRef<HTMLDivElement>(null);
 
@@ -97,6 +101,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
 
   useClickOutside(snoozeRef, showSnooze, () => setShowSnooze(false));
   useClickOutside(selectionActionsRef, !!showSelectionActions, () => setShowSelectionActions(null));
+  useClickOutside(linkActionsRef, !!showLinkActions, () => setShowLinkActions(null));
   useClickOutside(translateRef, !!showTranslate, () => setShowTranslate(null));
   useClickOutside(themePickerRef, showThemePicker, () => setShowThemePicker(false));
 
@@ -207,6 +212,19 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
     if (selectedText.length <= 5) return;
     e.preventDefault();
     openSelectionActionsForSelection({ x: e.clientX, y: e.clientY }, selectedText);
+  }
+
+  function handleLinkContextMenu(link: MessageLinkContextMenuRequest) {
+    // A right click on a link means the link, not whatever text happens to
+    // sit under the cursor, so the selected-text menu gives way to this one.
+    setShowSelectionActions(null);
+    setShowLinkActions({ href: link.href, position: { x: link.x, y: link.y } });
+  }
+
+  function handleOpenMessageLink(href: string) {
+    setShowLinkActions(null);
+    void openMessageLink(href)
+      .catch((err) => console.warn("Failed to open email body link", err));
   }
 
   /**
@@ -553,7 +571,11 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
                     </div>
                   )}
                   {(bilingualResult as TranslateResult & { _isHtml?: boolean })._isHtml ? (
-                    <ShadowDomEmail html={bilingualResult.translated} theme={theme} />
+                    <ShadowDomEmail
+                      html={bilingualResult.translated}
+                      theme={theme}
+                      onLinkContextMenu={handleLinkContextMenu}
+                    />
                   ) : (
                     <BilingualView segments={bilingualResult.segments ?? []} />
                   )}
@@ -576,7 +598,11 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
                   </div>
                   {/* The mail itself stays readable — a failed translation must not hide it. */}
                   {rendered && rendered.html ? (
-                    <ShadowDomEmail html={rendered.html} theme={theme} />
+                    <ShadowDomEmail
+                      html={rendered.html}
+                      theme={theme}
+                      onLinkContextMenu={handleLinkContextMenu}
+                    />
                   ) : (
                     <pre
                       className="message-body-text"
@@ -595,7 +621,11 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
                   )}
                 </>
               ) : rendered && rendered.html ? (
-                <ShadowDomEmail html={rendered.html} theme={theme} />
+                <ShadowDomEmail
+                  html={rendered.html}
+                  theme={theme}
+                  onLinkContextMenu={handleLinkContextMenu}
+                />
               ) : (
                 <pre
                   className="message-body-text"
@@ -640,6 +670,17 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
             onCreateRule={handleCreateRuleFromSelection}
             onAddToKanbanNote={handleAddSelectionToKanbanNote}
             onClose={() => setShowSelectionActions(null)}
+          />
+        </div>
+      )}
+
+      {showLinkActions && (
+        <div ref={linkActionsRef}>
+          <LinkActionPopover
+            href={showLinkActions.href}
+            position={showLinkActions.position}
+            onOpen={handleOpenMessageLink}
+            onClose={() => setShowLinkActions(null)}
           />
         </div>
       )}

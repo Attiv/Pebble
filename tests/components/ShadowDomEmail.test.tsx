@@ -1,4 +1,4 @@
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { createEvent, fireEvent, render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ShadowDomEmail, shadowEmailCss } from "@/components/ShadowDomEmail";
 import { getMessageTheme } from "@/lib/messageThemes";
@@ -257,5 +257,55 @@ describe("ShadowDomEmail", () => {
 
     expect(mocks.openMailtoUrl).toHaveBeenCalledWith("mailto:qingj1314@163.com");
     expect(mocks.invoke).not.toHaveBeenCalled();
+  });
+
+  /// The body lives in a shadow root, where the webview raises no menu of its
+  /// own — so a link's address had no way out of the app until the component
+  /// started announcing the gesture to the app around it.
+  it("reports a right click on a link so the app can offer its address", async () => {
+    const onLinkContextMenu = vi.fn();
+    const { container } = render(
+      <ShadowDomEmail
+        html={'<p>See <a href="https://pebble.byebug.cn/docs">the docs</a></p>'}
+        onLinkContextMenu={onLinkContextMenu}
+      />,
+    );
+    const host = container.firstChild as HTMLDivElement | null;
+
+    await waitFor(() => {
+      expect(host?.shadowRoot?.querySelector("a")).not.toBeNull();
+    });
+
+    const anchor = host!.shadowRoot!.querySelector("a")!;
+    const contextMenu = createEvent.contextMenu(anchor, { clientX: 40, clientY: 60 });
+    const preventDefault = vi.spyOn(contextMenu, "preventDefault");
+    const stopPropagation = vi.spyOn(contextMenu, "stopPropagation");
+    fireEvent(anchor, contextMenu);
+
+    expect(preventDefault).toHaveBeenCalled();
+    // The container's selected-text handler sits above the shadow boundary
+    // and must not raise a second menu for the same gesture.
+    expect(stopPropagation).toHaveBeenCalled();
+    expect(onLinkContextMenu).toHaveBeenCalledWith({
+      href: "https://pebble.byebug.cn/docs",
+      x: 40,
+      y: 60,
+    });
+  });
+
+  it("leaves a right click on plain body text to the app", async () => {
+    const onLinkContextMenu = vi.fn();
+    const { container } = render(
+      <ShadowDomEmail html="<p>no link here</p>" onLinkContextMenu={onLinkContextMenu} />,
+    );
+    const host = container.firstChild as HTMLDivElement | null;
+
+    await waitFor(() => {
+      expect(host?.shadowRoot?.querySelector("p")).not.toBeNull();
+    });
+
+    fireEvent.contextMenu(host!.shadowRoot!.querySelector("p")!);
+
+    expect(onLinkContextMenu).not.toHaveBeenCalled();
   });
 });

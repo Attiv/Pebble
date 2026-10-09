@@ -167,6 +167,9 @@
     "themeSystemDesc": "自动匹配系统设置",
     "messageTheme": "邮件详情主题",
     "messageThemeDesc": "邮件详情页使用的视觉模板；也可以在邮件内的调色板图标处切换。",
+    "motion": "动态效果",
+    "enableAnimations": "启用界面动画",
+    "enableAnimationsDesc": "为偶发的界面切换和反馈添加动画；关闭后状态会立即切换。",
     "backgroundImage": "背景图",
     "backgroundImageDesc": "图片会保存在 Pebble 的应用数据目录。",
     "noBackgroundImage": "未设置背景图",
@@ -835,6 +838,13 @@
     "createRuleFromSelection": "用选中文本创建规则",
     "addToKanbanNoteLabel": "加入看板备注",
     "addToKanbanNote": "加入看板备注"
+  },
+  "linkActions": {
+    "label": "链接操作",
+    "copy": "复制链接",
+    "copied": "链接已复制",
+    "copyFailed": "复制链接失败",
+    "open": "打开链接"
   },
   "titleBar": {
     "minimize": "最小化",

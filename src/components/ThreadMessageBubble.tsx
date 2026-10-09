@@ -1,11 +1,14 @@
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getRenderedHtml } from "@/lib/api";
 import type { Message, RenderedHtml } from "@/lib/api";
 import { defaultPrivacyMode } from "@/lib/privacyMode";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
-import { ShadowDomEmail } from "./ShadowDomEmail";
+import { openMessageLink } from "@/lib/openMessageLink";
+import { useClickOutside } from "@/hooks/useClickOutside";
+import { ShadowDomEmail, type MessageLinkContextMenuRequest } from "./ShadowDomEmail";
+import LinkActionPopover from "./LinkActionPopover";
 import ContactAddressAction from "./ContactAddressAction";
 import { uniqueContactParticipants } from "./contact-participants";
 
@@ -25,6 +28,10 @@ export default function ThreadMessageBubble({ message, defaultExpanded = false }
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [rendered, setRendered] = useState<RenderedHtml | null>(null);
+  // A thread body is the same isolated renderer as the message detail, so
+  // its links need the same way out.
+  const [showLinkActions, setShowLinkActions] = useState<{ href: string; position: { x: number; y: number } } | null>(null);
+  const linkActionsRef = useRef<HTMLDivElement>(null);
   const contactParticipants = uniqueContactParticipants(
     { name: message.from_name, address: message.from_address },
     message.to_list,
@@ -38,6 +45,18 @@ export default function ThreadMessageBubble({ message, defaultExpanded = false }
         .catch((err) => console.warn("Failed to render thread message HTML", err));
     }
   }, [expanded, rendered, message.id]);
+
+  useClickOutside(linkActionsRef, !!showLinkActions, () => setShowLinkActions(null));
+
+  function handleLinkContextMenu(link: MessageLinkContextMenuRequest) {
+    setShowLinkActions({ href: link.href, position: { x: link.x, y: link.y } });
+  }
+
+  function handleOpenMessageLink(href: string) {
+    setShowLinkActions(null);
+    void openMessageLink(href)
+      .catch((err) => console.warn("Failed to open email body link", err));
+  }
 
   return (
     <div
@@ -105,7 +124,7 @@ export default function ThreadMessageBubble({ message, defaultExpanded = false }
           </div>
           {/* Body content */}
           {rendered?.html ? (
-            <ShadowDomEmail html={rendered.html} />
+            <ShadowDomEmail html={rendered.html} onLinkContextMenu={handleLinkContextMenu} />
           ) : (
             <pre style={{
               fontSize: "13px", color: "var(--color-text-primary)",
@@ -115,6 +134,17 @@ export default function ThreadMessageBubble({ message, defaultExpanded = false }
               {message.body_text}
             </pre>
           )}
+        </div>
+      )}
+
+      {showLinkActions && (
+        <div ref={linkActionsRef}>
+          <LinkActionPopover
+            href={showLinkActions.href}
+            position={showLinkActions.position}
+            onOpen={handleOpenMessageLink}
+            onClose={() => setShowLinkActions(null)}
+          />
         </div>
       )}
     </div>
