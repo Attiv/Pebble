@@ -41,6 +41,7 @@ export default function SelectionActionPopover({
 
   return (
     <div
+      className="pebble-popover-enter"
       role="toolbar"
       aria-label={t("selection.actions", "Selected text actions")}
       style={{

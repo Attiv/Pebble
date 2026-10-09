@@ -41,6 +41,7 @@ export interface RealtimeStatus {
 const REALTIME_PREFERENCE_KEY = "pebble-realtime-mode";
 const REALTIME_PREFERENCES = new Set<RealtimePreference>(["realtime", "balanced", "battery", "manual"]);
 const NOTIFICATIONS_KEY = "pebble-notifications-enabled";
+const ANIMATIONS_ENABLED_KEY = "pebble-animations-enabled";
 const KEEP_RUNNING_BACKGROUND_KEY = "pebble-keep-running-background";
 export const BACKGROUND_IMAGE_STORAGE_KEY = "pebble-background-image-settings";
 const BACKGROUND_IMAGE_FITS = new Set<BackgroundImageFit>(["cover", "contain", "repeat"]);
@@ -97,6 +98,11 @@ export function readNotificationsEnabledPreference(): boolean {
   return stored === null ? true : stored === "true";
 }
 
+export function readAnimationsEnabledPreference(): boolean {
+  const stored = profileLocalStorage.getItem(ANIMATIONS_ENABLED_KEY);
+  return stored === null ? true : stored === "true";
+}
+
 export function readKeepRunningInBackgroundPreference(): boolean {
   const stored = profileLocalStorage.getItem(KEEP_RUNNING_BACKGROUND_KEY);
   return stored === null ? true : stored === "true";
@@ -117,6 +123,7 @@ export function realtimePreferenceToPollInterval(mode: RealtimePreference): numb
 
 const initialRealtimeMode = readRealtimePreference();
 const initialNotificationsEnabled = readNotificationsEnabledPreference();
+const initialAnimationsEnabled = readAnimationsEnabledPreference();
 const initialKeepRunningInBackground = readKeepRunningInBackgroundPreference();
 const initialStartHiddenToTray = readStartHiddenToTrayPreference();
 const initialLanguage = getInitialLanguage();
@@ -154,6 +161,8 @@ interface UIState {
   realtimeMode: RealtimePreference;
   notificationsEnabled: boolean;
   setNotificationsEnabled: (enabled: boolean) => void;
+  animationsEnabled: boolean;
+  setAnimationsEnabled: (enabled: boolean) => void;
   keepRunningInBackground: boolean;
   setKeepRunningInBackground: (enabled: boolean) => void;
   startHiddenToTray: boolean;
@@ -205,6 +214,11 @@ export const useUIStore = create<UIState>((set) => ({
   setNotificationsEnabled: (enabled) => {
     profileLocalStorage.setItem(NOTIFICATIONS_KEY, String(enabled));
     set({ notificationsEnabled: enabled });
+  },
+  animationsEnabled: initialAnimationsEnabled,
+  setAnimationsEnabled: (enabled) => {
+    profileLocalStorage.setItem(ANIMATIONS_ENABLED_KEY, String(enabled));
+    set({ animationsEnabled: enabled });
   },
   keepRunningInBackground: initialKeepRunningInBackground,
   setKeepRunningInBackground: (enabled) => {

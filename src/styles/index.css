@@ -209,8 +209,33 @@ option {
 /* ─── Animations ──────────────────────────────────────────── */
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
+  from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes viewEnter {
+  from { opacity: 0; transform: translateY(18px) scale(0.988); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes panelSlideIn {
+  from { opacity: 0; transform: translateX(26px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes popIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.94); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes backdropIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes rowReveal {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
 }
 
 @keyframes shimmer {
@@ -225,6 +250,153 @@ option {
 
 .fade-in {
   animation: fadeIn 0.2s ease-out both;
+}
+
+.settings-panel-enter {
+  animation: panelSlideIn 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.app-view-enter {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  animation: viewEnter 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.message-detail-container,
+.compose-form-shell,
+.contacts-view {
+  animation: panelSlideIn 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* The reader should land on the sender first: the identity block and the
+   body come in on their own short delay instead of arriving as one slab.
+   Both are play-once on mount, so a re-render never replays them. */
+.message-detail-header {
+  animation: fadeIn 0.24s ease-out both;
+}
+
+.message-body-area {
+  animation: fadeIn 0.3s 60ms ease-out both;
+}
+
+.message-list-row {
+  animation: rowReveal 0.28s ease-out both;
+}
+
+.message-list-row:nth-child(2) { animation-delay: 25ms; }
+.message-list-row:nth-child(3) { animation-delay: 50ms; }
+.message-list-row:nth-child(4) { animation-delay: 75ms; }
+.message-list-row:nth-child(5) { animation-delay: 100ms; }
+.message-list-row:nth-child(n + 6) { animation-delay: 150ms; }
+
+.contact-dialog-backdrop {
+  animation: backdropIn 0.18s ease-out both;
+}
+
+.contact-dialog,
+.compose-inline-panel,
+.compose-template-scroll {
+  animation: popIn 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: top center;
+}
+
+.compose-toolbar-icon-button,
+.compose-toolbar-text-button,
+.compose-format-button,
+.compose-mode-button {
+  transition: transform 0.16s ease, background-color 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+}
+
+.compose-toolbar-icon-button:active,
+.compose-toolbar-text-button:active,
+.compose-format-button:active,
+.compose-mode-button:active {
+  transform: scale(0.94);
+}
+
+/* ─── Motion · press feedback ───────────────────────────────
+   A control that only changes colour when pressed still reads as "nothing
+   happened". These reuse the compose toolbar's own gesture — the same 0.94
+   scale over the same 160ms — so one press means one thing everywhere.
+   ────────────────────────────────────────────────────────── */
+
+.message-detail-icon-button:active,
+.inbox-toolbar-button:active,
+.search-toolbar-button:active,
+.search-filter-toggle:active,
+.search-filters-clear:active,
+.contact-address-action:active:not(:disabled),
+.contact-primary-button:active,
+.contact-secondary-button:active,
+.contact-danger-button:active,
+.contact-icon-button:active {
+  transform: scale(0.94);
+}
+
+/* A floating surface that grows out of the point it belongs to reads as
+   attached to it; one that blinks into place does not. Fill mode stays
+   `none` so nothing here can outrank a positioning transform an element
+   carries in its own style. */
+.pebble-popover-enter {
+  animation: popIn 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Dropdowns that hang off the top-right corner of their trigger should grow
+   from that corner, not from their own centre. */
+.pebble-popover-enter--top-right {
+  transform-origin: top right;
+}
+
+/* ─── Motion · list rows ────────────────────────────────────
+   The unread dot is the one mark that appears by itself, mid-list, with no
+   layout change to explain it — a 0.26s pop reads as "this just arrived"
+   rather than "the list redrew". The row's hover actions fade in instead of
+   blinking on.
+   ────────────────────────────────────────────────────────── */
+
+@keyframes unreadDotIn {
+  from { opacity: 0; transform: scale(0.4); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes rowActionsIn {
+  from { opacity: 0; transform: translate(8px, -50%); }
+  to   { opacity: 1; transform: translate(0, -50%); }
+}
+
+.message-unread-dot {
+  /* `backwards`, not `both`: once the dot has popped it holds no transform
+     of its own, so a row hover can scale it without fighting the animation. */
+  animation: unreadDotIn 0.26s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  transition: transform 0.16s ease;
+}
+
+/* The one mark on a row that answers the pointer. It is 6px wide, so this
+   reads as the list noticing the cursor — not as the list moving. */
+.message-list-row:hover .message-unread-dot {
+  transform: scale(1.4);
+}
+
+.message-row-actions {
+  animation: rowActionsIn 0.16s ease-out;
+}
+
+/* Switching message template or app theme repaints large surfaces; letting
+   the colour travel instead of cutting makes it read as a change of state
+   rather than a repaint. */
+.message-detail-container,
+.message-body-surface {
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+[data-motion="disabled"] *,
+[data-motion="disabled"] *::before,
+[data-motion="disabled"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-delay: 0s !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
 }
 
 .skeleton {
@@ -397,6 +569,7 @@ option {
   background: none;
   cursor: pointer;
   color: var(--msg-meta-color, var(--color-text-secondary));
+  transition: transform 0.16s ease, background-color 0.14s ease, color 0.14s ease;
 }
 
 .message-detail-icon-button:hover {
@@ -1212,7 +1385,7 @@ textarea:focus-visible {
   cursor: pointer;
   font: inherit;
   line-height: 1;
-  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+  transition: transform 0.16s ease, background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
 }
 
 .inbox-toolbar-button:hover {
@@ -1244,7 +1417,7 @@ textarea:focus-visible {
   font-size: 13px;
   font-weight: 500;
   line-height: 1;
-  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+  transition: transform 0.16s ease, background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
 }
 
 .search-toolbar-button:hover {
@@ -1399,7 +1572,7 @@ textarea:focus-visible {
   cursor: pointer;
   font-size: 13px;
   line-height: 1;
-  transition: border-color 0.14s ease, background-color 0.14s ease, color 0.14s ease;
+  transition: transform 0.16s ease, border-color 0.14s ease, background-color 0.14s ease, color 0.14s ease;
 }
 
 .search-filter-toggle:hover {
@@ -1435,7 +1608,7 @@ textarea:focus-visible {
   font: inherit;
   font-size: 12px;
   font-weight: 500;
-  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+  transition: transform 0.16s ease, background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
 }
 
 .search-filters-clear:hover {
@@ -1904,7 +2077,7 @@ textarea:focus-visible {
   font: inherit;
   font-size: 12px;
   font-weight: 600;
-  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease, opacity 0.14s ease;
+  transition: transform 0.16s ease, background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease, opacity 0.14s ease;
 }
 
 .contact-address-action {
@@ -1919,7 +2092,7 @@ textarea:focus-visible {
   background: var(--color-bg);
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+  transition: transform 0.16s ease, background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
 }
 
 .contact-address-action:hover:not(:disabled) {

@@ -74,6 +74,7 @@ export default function SnoozePopover({ messageId, onClose, onSnoozed }: Props) 
     <div
       role="dialog"
       aria-label={t("snooze.until", "Snooze until...")}
+      className="pebble-popover-enter pebble-popover-enter--top-right"
       style={{
         position: "absolute",
         top: "100%",

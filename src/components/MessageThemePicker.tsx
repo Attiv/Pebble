@@ -211,6 +211,7 @@ export default function MessageThemePicker({ activeTheme, onSelect }: Props) {
     <div
       role="dialog"
       aria-label={t("messageThemes.title", "Message theme")}
+      className="pebble-popover-enter pebble-popover-enter--top-right"
       style={{
         position: "absolute",
         top: "100%",

@@ -65,6 +65,7 @@ export default function Layout() {
   const theme = useUIStore((s) => s.theme);
   const backgroundImage = useUIStore((s) => s.backgroundImage);
   const notificationsEnabled = useUIStore((s) => s.notificationsEnabled);
+  const animationsEnabled = useUIStore((s) => s.animationsEnabled);
   const { t } = useTranslation();
   const queryClient = useQueryClient();
 
@@ -128,9 +129,14 @@ export default function Layout() {
     }
   }, [theme]);
 
+  useEffect(() => {
+    document.documentElement.setAttribute("data-motion", animationsEnabled ? "enabled" : "disabled");
+  }, [animationsEnabled]);
+
   return (
     <div
       className={`app-shell flex flex-col h-screen overflow-hidden${backgroundImage ? " app-shell--with-background" : ""}`}
+      data-motion={animationsEnabled ? "enabled" : "disabled"}
     >
       <AppBackground image={backgroundImage} />
       <WindowResizeHandles />
@@ -141,16 +147,18 @@ export default function Layout() {
         <main className="flex-1 min-w-0 overflow-auto scroll-region app-main-scroll" style={{ position: "relative" }}>
           <OfflineBanner />
           <ViewErrorBoundary key={displayedView}>
-            <Suspense fallback={<ViewLoadingFallback />}>
-              {displayedView === "inbox" && <InboxView />}
-              {displayedView === "kanban" && <KanbanView />}
-              {displayedView === "contacts" && <ContactsView />}
-              {displayedView === "settings" && <SettingsView />}
-              {displayedView === "search" && <SearchView />}
-              {displayedView === "snoozed" && <SnoozedView />}
-              {displayedView === "starred" && <StarredView />}
-              {displayedView === "compose" && <ComposeView key={composeKey} />}
-            </Suspense>
+            <div key={displayedView} className="app-view-enter">
+              <Suspense fallback={<ViewLoadingFallback />}>
+                {displayedView === "inbox" && <InboxView />}
+                {displayedView === "kanban" && <KanbanView />}
+                {displayedView === "contacts" && <ContactsView />}
+                {displayedView === "settings" && <SettingsView />}
+                {displayedView === "search" && <SearchView />}
+                {displayedView === "snoozed" && <SnoozedView />}
+                {displayedView === "starred" && <StarredView />}
+                {displayedView === "compose" && <ComposeView key={composeKey} />}
+              </Suspense>
+            </div>
           </ViewErrorBoundary>
         </main>
       </div>

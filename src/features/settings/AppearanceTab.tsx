@@ -39,6 +39,8 @@ export default function AppearanceTab() {
   const setTheme = useUIStore((s) => s.setTheme);
   const language = useUIStore((s) => s.language);
   const setLanguage = useUIStore((s) => s.setLanguage);
+  const animationsEnabled = useUIStore((s) => s.animationsEnabled);
+  const setAnimationsEnabled = useUIStore((s) => s.setAnimationsEnabled);
   const backgroundImage = useUIStore((s) => s.backgroundImage);
   const setBackgroundImage = useUIStore((s) => s.setBackgroundImage);
   const setBackgroundImageFit = useUIStore((s) => s.setBackgroundImageFit);
@@ -159,6 +161,33 @@ export default function AppearanceTab() {
           </button>
         ))}
       </div>
+
+      <h3 style={{ fontSize: "14px", fontWeight: 600, marginBottom: "16px", marginTop: "32px" }}>
+        {t("settings.motion", "Motion")}
+      </h3>
+      <label
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: "8px",
+          cursor: "pointer",
+          color: "var(--color-text-primary)",
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={animationsEnabled}
+          onChange={(event) => setAnimationsEnabled(event.currentTarget.checked)}
+        />
+        <span>
+          <span style={{ display: "block", fontSize: "13px", fontWeight: 600 }}>
+            {t("settings.enableAnimations", "Enable interface animations")}
+          </span>
+          <span style={{ display: "block", marginTop: "3px", fontSize: "12px", color: "var(--color-text-secondary)" }}>
+            {t("settings.enableAnimationsDesc", "Animate occasional transitions and feedback. Disabled motion changes state instantly.")}
+          </span>
+        </span>
+      </label>
 
       <h3 style={{ fontSize: "14px", fontWeight: 600, marginBottom: "16px", marginTop: "32px" }}>
         {t("settings.backgroundImage", "Background image")}

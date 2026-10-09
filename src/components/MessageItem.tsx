@@ -162,7 +162,10 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
             {primaryContact}
           </span>
           {!message.is_read && (
-            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--color-accent)", flexShrink: 0 }} />
+            <span
+              className="message-unread-dot"
+              style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--color-accent)", flexShrink: 0 }}
+            />
           )}
         </span>
         <div style={{ display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
@@ -231,6 +234,7 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
       </div>
       {showActions && (
         <div
+          className="message-row-actions"
           onClick={(e) => e.stopPropagation()}
           style={{
             position: "absolute",

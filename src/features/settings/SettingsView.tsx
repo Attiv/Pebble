@@ -95,7 +95,8 @@ export default function SettingsView() {
       {/* Tab content */}
       <div
         id={`settings-tabpanel-${activeTab}`}
-        className="scroll-region settings-panel-scroll"
+        key={activeTab}
+        className="scroll-region settings-panel-scroll settings-panel-enter"
         role="tabpanel"
         aria-labelledby={`settings-tab-${activeTab}`}
         style={{

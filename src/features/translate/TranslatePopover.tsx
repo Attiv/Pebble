@@ -75,6 +75,7 @@ export default function TranslatePopover({ text, position, onClose }: Props) {
 
   return (
     <div
+      className="pebble-popover-enter"
       style={{
         position: "fixed",
         left: Math.min(position.x, window.innerWidth - 340),
