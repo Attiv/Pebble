@@ -3,6 +3,8 @@ import { sanitizeHtml, reapplyInlineStyles } from "@/lib/sanitizeHtml";
 import { messageThemeContentCss, type MessageTheme } from "@/lib/messageThemes";
 import { isSupportedLink, openMessageLink } from "@/lib/openMessageLink";
 import { SOURCE_ECHO_CSS } from "@/lib/sourceEcho";
+import { FORWARD_CARD_CSS } from "@/lib/forwardCardCss";
+import { buildForwardCards, type ForwardCardLabels } from "@/lib/forwardCard";
 
 /** Where the reader right-clicked a link, and which address it carried. */
 export interface MessageLinkContextMenuRequest {
@@ -26,6 +28,13 @@ interface ShadowDomEmailProps {
    * landed and on which address.
    */
   onLinkContextMenu?: (link: MessageLinkContextMenuRequest) => void;
+  /**
+   * Localised copy for rebuilt forward cards. Without it a forwarded block is
+   * rendered exactly as the sender wrote it — a divider line between two
+   * paragraphs — which is what a reader that has no copy for the labels should
+   * fall back to.
+   */
+  forwardLabels?: ForwardCardLabels;
 }
 
 /**
@@ -201,7 +210,8 @@ export function shadowEmailCss(theme?: MessageTheme | null): string {
           box-sizing: border-box;
         }
         ${SOURCE_ECHO_CSS}
-        ${theme ? messageThemeContentCss(theme) : ""}`;
+        ${theme ? messageThemeContentCss(theme) : ""}
+        ${FORWARD_CARD_CSS}`;
 }
 
 /**
@@ -332,10 +342,27 @@ export function ShadowDomEmail({
   className,
   theme,
   onLinkContextMenu,
+  forwardLabels,
 }: ShadowDomEmailProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const onLinkContextMenuRef = useRef(onLinkContextMenu);
   onLinkContextMenuRef.current = onLinkContextMenu;
+  const forwardLabelsRef = useRef(forwardLabels);
+  forwardLabelsRef.current = forwardLabels;
+  // The labels arrive as an object, which would be a new identity on every
+  // render of the caller. Keying the effect on their content keeps the shadow
+  // body — and every image frame in it — from being rebuilt while the reader
+  // merely re-renders.
+  const forwardLabelKey = forwardLabels
+    ? [
+      forwardLabels.badge,
+      forwardLabels.history,
+      forwardLabels.from,
+      forwardLabels.date,
+      forwardLabels.to,
+      forwardLabels.cc,
+    ].join("\u0000")
+    : "";
 
   // The shadow body must be ready before paint; otherwise the reader can flash
   // from the fallback text into the sanitized HTML a frame later.
@@ -352,6 +379,13 @@ export function ShadowDomEmail({
       ? `<div class="pebble-email-content">${safeHtml}</div>`
       : `<style>${css}</style>
       <div class="pebble-email-content">${safeHtml}</div>`;
+
+    // A forwarded block arrives as a divider line followed by `From:`-style
+    // lines and the body. Rebuilt into a card before inline styles are handed
+    // back, so the card owns the typography of everything it lifts.
+    const content = shadow.querySelector(".pebble-email-content");
+    const labels = forwardLabelsRef.current;
+    if (content && labels) buildForwardCards(content, labels);
 
     // The message's own `style` attributes are refused by the same CSP that
     // killed the `<style>` element, so what they carry has to be handed back
@@ -402,7 +436,7 @@ export function ShadowDomEmail({
       shadow.removeEventListener("click", handleClick);
       shadow.removeEventListener("contextmenu", handleContextMenu);
     };
-  }, [html, theme]);
+  }, [html, theme, forwardLabelKey]);
 
   return (
     <div

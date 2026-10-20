@@ -7,6 +7,7 @@ import { defaultPrivacyMode } from "@/lib/privacyMode";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import { openMessageLink } from "@/lib/openMessageLink";
 import { useClickOutside } from "@/hooks/useClickOutside";
+import { useForwardCardLabels } from "@/hooks/useForwardCardLabels";
 import { ShadowDomEmail, type MessageLinkContextMenuRequest } from "./ShadowDomEmail";
 import LinkActionPopover from "./LinkActionPopover";
 import ContactAddressAction from "./ContactAddressAction";
@@ -26,6 +27,7 @@ function formatFullDate(timestamp: number): string {
 
 export default function ThreadMessageBubble({ message, defaultExpanded = false }: Props) {
   const { t } = useTranslation();
+  const forwardLabels = useForwardCardLabels();
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [rendered, setRendered] = useState<RenderedHtml | null>(null);
   // A thread body is the same isolated renderer as the message detail, so
@@ -124,7 +126,11 @@ export default function ThreadMessageBubble({ message, defaultExpanded = false }
           </div>
           {/* Body content */}
           {rendered?.html ? (
-            <ShadowDomEmail html={rendered.html} onLinkContextMenu={handleLinkContextMenu} />
+            <ShadowDomEmail
+              html={rendered.html}
+              forwardLabels={forwardLabels}
+              onLinkContextMenu={handleLinkContextMenu}
+            />
           ) : (
             <pre style={{
               fontSize: "13px", color: "var(--color-text-primary)",

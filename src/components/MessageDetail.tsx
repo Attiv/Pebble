@@ -20,6 +20,7 @@ import { defaultPrivacyMode } from "@/lib/privacyMode";
 import { getMessageTheme, messageThemeVariables, resolveMessageTheme, senderInitials } from "@/lib/messageThemes";
 import { openMessageLink } from "@/lib/openMessageLink";
 import { useResolvedAppTheme } from "@/hooks/useResolvedAppTheme";
+import { useForwardCardLabels } from "@/hooks/useForwardCardLabels";
 import { useKanbanStore } from "@/stores/kanban.store";
 import { useToastStore } from "@/stores/toast.store";
 import { useUIStore } from "@/stores/ui.store";
@@ -68,6 +69,9 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
   // read as a value and the template is resolved before anything consumes it.
   const isDarkApp = useResolvedAppTheme() === "dark";
   const theme = resolveMessageTheme(getMessageTheme(messageThemeId), isDarkApp);
+  // A forwarded block is rebuilt as a card inside the shadow root, where no
+  // translation context reaches — the labels travel with the call.
+  const forwardLabels = useForwardCardLabels();
   const [privacyOverride, setPrivacyOverride] = useState<{
     messageId: string;
     mode: PrivacyMode;
@@ -412,20 +416,39 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
           <span className="message-detail-from-address">&lt;{message.from_address}&gt;</span>
         )}
       </div>
-      {(recipientLine || ccLine) && (
-        <div className="message-detail-recipients">
-          {recipientLine && (
-            <span>
-              {t("messageDetail.to", "To:")}&nbsp;{recipientLine}
+      {/* The envelope details are a definition list, not a second paragraph:
+          a muted label column puts "to / cc / date" clearly below the sender
+          line and well below the subject. */}
+      <div className="message-detail-meta">
+        {recipientLine && (
+          <div className="message-detail-meta-row">
+            <span className="message-detail-meta-label">{t("messageDetail.to", "To")}</span>
+            <span
+              className="message-detail-meta-value message-detail-recipients"
+              title={recipientLine}
+            >
+              {recipientLine}
             </span>
-          )}
-          {ccLine && (
-            <span>
-              {t("messageDetail.cc", "Cc:")}&nbsp;{ccLine}
+          </div>
+        )}
+        {ccLine && (
+          <div className="message-detail-meta-row">
+            <span className="message-detail-meta-label">{t("messageDetail.cc", "Cc")}</span>
+            <span
+              className="message-detail-meta-value message-detail-recipients"
+              title={ccLine}
+            >
+              {ccLine}
             </span>
-          )}
+          </div>
+        )}
+        <div className="message-detail-meta-row">
+          <span className="message-detail-meta-label">{t("messageDetail.date", "Date")}</span>
+          <span className="message-detail-meta-value message-detail-date">
+            {formatFullDate(message.date)}
+          </span>
         </div>
-      )}
+      </div>
       <div
         className="message-detail-contacts"
         aria-label={t("contacts.participantActions", "Contact actions")}
@@ -439,7 +462,6 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
           />
         ))}
       </div>
-      <div className="message-detail-date">{formatFullDate(message.date)}</div>
     </div>
   );
 
@@ -574,6 +596,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
                     <ShadowDomEmail
                       html={bilingualResult.translated}
                       theme={theme}
+                      forwardLabels={forwardLabels}
                       onLinkContextMenu={handleLinkContextMenu}
                     />
                   ) : (
@@ -601,6 +624,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
                     <ShadowDomEmail
                       html={rendered.html}
                       theme={theme}
+                      forwardLabels={forwardLabels}
                       onLinkContextMenu={handleLinkContextMenu}
                     />
                   ) : (
@@ -624,6 +648,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
                 <ShadowDomEmail
                   html={rendered.html}
                   theme={theme}
+                  forwardLabels={forwardLabels}
                   onLinkContextMenu={handleLinkContextMenu}
                 />
               ) : (

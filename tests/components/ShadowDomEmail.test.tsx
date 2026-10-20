@@ -308,4 +308,65 @@ describe("ShadowDomEmail", () => {
 
     expect(onLinkContextMenu).not.toHaveBeenCalled();
   });
+
+  const forwardLabels = {
+    badge: "转发邮件",
+    history: "历史邮件",
+    from: "发件人",
+    date: "日期",
+    to: "收件人",
+    cc: "抄送",
+  };
+
+  const forwardedBody = [
+    "<p>FYI</p>",
+    "<p>---------- 转发邮件 ----------</p>",
+    "<p>发件人：ant.wilson@supabase.com</p>",
+    "<p>主题：Project is going to be paused</p>",
+    "<p>Body of the forwarded message</p>",
+  ].join("");
+
+  it("rebuilds a forwarded block as a card inside the shadow root", async () => {
+    const { container } = render(
+      <ShadowDomEmail html={forwardedBody} forwardLabels={forwardLabels} />,
+    );
+    const host = container.firstChild as HTMLDivElement | null;
+
+    await waitFor(() => {
+      expect(host?.shadowRoot?.querySelector(".pebble-forward-card")).not.toBeNull();
+    });
+
+    const shadow = host!.shadowRoot!;
+    expect(shadow.querySelector(".pebble-forward-badge")?.textContent).toBe("转发邮件");
+    expect(shadow.querySelector(".pebble-forward-card__subject")?.textContent)
+      .toBe("Project is going to be paused");
+    expect(shadow.querySelector(".pebble-forward-card__meta-label")?.textContent).toBe("发件人");
+    expect(shadow.querySelector(".pebble-forward-card__meta-value")?.textContent)
+      .toBe("ant.wilson@supabase.com");
+    expect(shadow.querySelector(".pebble-forward-card__body")?.textContent)
+      .toContain("Body of the forwarded message");
+    // The divider line is replaced by the badge, not left in the running text.
+    expect(shadow.textContent).not.toContain("---------- 转发邮件");
+    expect(shadow.textContent).toContain("FYI");
+  });
+
+  it("leaves the divider alone when the reader has no labels for it", async () => {
+    const { container } = render(<ShadowDomEmail html={forwardedBody} />);
+    const host = container.firstChild as HTMLDivElement | null;
+
+    await waitFor(() => {
+      expect(host?.shadowRoot?.querySelector(".pebble-email-content")).not.toBeNull();
+    });
+
+    const shadow = host!.shadowRoot!;
+    expect(shadow.querySelector(".pebble-forward-card")).toBeNull();
+    expect(shadow.textContent).toContain("---------- 转发邮件");
+  });
+
+  it("ships the forward card rules in the shadow stylesheet", () => {
+    const css = shadowEmailCss(null);
+    expect(css).toContain(".pebble-forward-card {");
+    expect(css).toContain(".pebble-forward-card__meta-label {");
+    expect(css).toContain(".pebble-forward-history__label {");
+  });
 });
