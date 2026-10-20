@@ -1,11 +1,10 @@
 import { senderIdentityLabel } from "@/lib/accountIdentity";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { EditorContent } from "@tiptap/react";
 import {
   ArrowLeft, Send, X, AlertCircle,
   Type, FileCode2, Hash, Eye, EyeOff,
   Paperclip, FileText, Trash2, BookTemplate,
-  ChevronDown, ChevronRight,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useMailStore } from "@/stores/mail.store";
@@ -19,12 +18,13 @@ import type { EmailTemplate } from "@/lib/templates";
 import { useComposeRecipients } from "@/hooks/useComposeRecipients";
 import { useComposeDraft, loadDraftFromStorage, clearDraftStorage } from "@/hooks/useComposeDraft";
 import { cleanupStagedComposeAttachment, deleteDraft, stageComposeAttachment } from "@/lib/api";
-import { appendReplyQuoteHtml, useComposeEditor } from "@/hooks/useComposeEditor";
+import { appendReplyQuoteHtml, appendQuotedContextText, quotedContextText, useComposeEditor } from "@/hooks/useComposeEditor";
 import { useConfirmStore } from "@/stores/confirm.store";
 import { useToastStore } from "@/stores/toast.store";
 import type { Account } from "@/lib/ipc-types";
 import type { ComposeAttachment } from "./compose-draft";
 import { ModeButton, EditorToolbar, MarkdownToolbar, composeStyles } from "./ComposeToolbar";
+import { ComposeForwardContext, ComposeReplyContext } from "./ComposeContextPanel";
 import ComposeAiAssistant from "../ai/ComposeAiAssistant";
 import { subjectAfterAddingAttachments } from "./attachment-subject";
 import { isValidEmailAddress, mergePendingRecipient } from "./recipient-utils";
@@ -94,7 +94,8 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
   const {
     editor, editorMode, rawSource, setRawSource,
     richTextHtml, htmlPreview, setHtmlPreview,
-    switchMode, textareaRef, quotedReplyHtml,
+    switchMode, textareaRef,
+    forwardedMessageHtml, quotedContextHtml, quotedContextEmailHtml,
   } = useComposeEditor({
     fromAccountId, composeMode, composeReplyTo, isReply, t,
     restoredDraft: restoredDraft.current,
@@ -127,10 +128,16 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
   useEffect(() => {
     if (editor && !editorReady) setEditorReady(true);
   }, [editor, editorReady]);
+  const quotedContextPlainText = useMemo(
+    () => quotedContextText(quotedContextEmailHtml),
+    [quotedContextEmailHtml],
+  );
   const { cancelPendingDraftSaves } = useComposeDraft({
     to, cc, bcc, subject, rawSource, richTextHtml, editorMode, composeMode, fromAccountId,
     attachments,
     editorReady,
+    contextHtml: quotedContextEmailHtml,
+    contextText: quotedContextPlainText,
     migrateLegacyDraft: Boolean(restoredDraft.current),
   });
 
@@ -139,7 +146,6 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [showSaveTemplate, setShowSaveTemplate] = useState(false);
   const [templateName, setTemplateName] = useState("");
-  const [showQuotedReply, setShowQuotedReply] = useState(false);
 
   async function refreshTemplates() {
     try {
@@ -356,7 +362,8 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
         bodyText = rawSource;
       }
     }
-    const outgoingBodyHtml = appendReplyQuoteHtml(bodyHtml, quotedReplyHtml);
+    const outgoingBodyHtml = appendReplyQuoteHtml(bodyHtml, quotedContextEmailHtml);
+    const outgoingBodyText = appendQuotedContextText(bodyText, quotedContextPlainText);
 
     const inReplyTo =
       isReply && composeReplyTo?.message_id_header
@@ -370,7 +377,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
         cc: finalCc,
         bcc: finalBcc,
         subject: finalSubject,
-        bodyText,
+        bodyText: outgoingBodyText,
         bodyHtml: outgoingBodyHtml || undefined,
         inReplyTo: inReplyTo || undefined,
         attachmentPaths: attachmentsRef.current.length > 0
@@ -508,7 +515,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
 
       {/* Fields + Editor */}
       <div className="scroll-region compose-scroll" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "auto" }}>
-        <div className="compose-form-shell">
+        <div className={`compose-form-shell${isReply && composeReplyTo ? " compose-form-shell--with-context" : ""}`}>
           {/* From */}
           {accounts.length > 0 && (
             <div style={composeStyles.fieldRow}>
@@ -778,7 +785,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
                   rawSource={rawSource}
                   setRawSource={setRawSource}
                   textareaRef={textareaRef}
-                  quotedReplyHtml={quotedReplyHtml}
+                  quotedReplyHtml={quotedContextHtml}
                 />
               </div>
             </div>
@@ -868,7 +875,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
 
           {/* Editor area */}
           <div
-            className="compose-editor-area"
+            className={`compose-editor-area${isReply && composeReplyTo ? " compose-editor-area--with-context" : ""}`}
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
             onDragLeave={() => setIsDragging(false)}
             onDrop={async (e) => {
@@ -907,62 +914,51 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
               }
             }}
           >
-            <div className="compose-editor-surface">
-              {editorMode === "rich" ? (
-                <EditorContent
-                  editor={editor}
-                  className="compose-editor-content"
-                />
-              ) : editorMode === "html" && htmlPreview ? (
-                <div className="compose-preview-split">
+            <div className="compose-editor-column">
+              <div className="compose-editor-surface">
+                {editorMode === "rich" ? (
+                  <EditorContent
+                    editor={editor}
+                    className="compose-editor-content"
+                  />
+                ) : editorMode === "html" && htmlPreview ? (
+                  <div className="compose-preview-split">
+                    <textarea
+                      ref={textareaRef}
+                      value={rawSource}
+                      onChange={(e) => setRawSource(e.target.value)}
+                      placeholder={t("compose.mode.htmlPlaceholder", "Write HTML source...")}
+                      spellCheck={false}
+                      className="compose-source-input compose-source-input--split is-code"
+                    />
+                    <iframe
+                      sandbox="allow-same-origin"
+                      srcDoc={rawSource}
+                      title={t("compose.mode.preview", "Preview")}
+                      className="compose-html-preview"
+                    />
+                  </div>
+                ) : (
                   <textarea
                     ref={textareaRef}
                     value={rawSource}
                     onChange={(e) => setRawSource(e.target.value)}
-                    placeholder={t("compose.mode.htmlPlaceholder", "Write HTML source...")}
-                    spellCheck={false}
-                    className="compose-source-input compose-source-input--split is-code"
-                  />
-                  <iframe
-                    sandbox="allow-same-origin"
-                    srcDoc={rawSource}
-                    title={t("compose.mode.preview", "Preview")}
-                    className="compose-html-preview"
-                  />
-                </div>
-              ) : (
-                <textarea
-                  ref={textareaRef}
-                  value={rawSource}
-                  onChange={(e) => setRawSource(e.target.value)}
-                  placeholder={editorMode === "markdown"
-                    ? t("compose.mode.markdownPlaceholder", "Write in Markdown...")
-                    : t("compose.mode.htmlPlaceholder", "Write HTML source...")}
-                  spellCheck={editorMode === "markdown"}
-                  className={`compose-source-input${editorMode === "html" ? " is-code" : ""}`}
-                />
-              )}
-            </div>
-            {quotedReplyHtml && (
-              <div className="compose-quoted-reply">
-                <button
-                  type="button"
-                  className="compose-quoted-reply-toggle"
-                  aria-expanded={showQuotedReply}
-                  onClick={() => setShowQuotedReply((value) => !value)}
-                >
-                  {showQuotedReply ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                  {showQuotedReply
-                    ? t("compose.hideQuotedReply", "Hide quoted message")
-                    : t("compose.showQuotedReply", "Show quoted message")}
-                </button>
-                {showQuotedReply && (
-                  <div
-                    className="scroll-region compose-quoted-reply-content"
-                    dangerouslySetInnerHTML={{ __html: quotedReplyHtml }}
+                    placeholder={editorMode === "markdown"
+                      ? t("compose.mode.markdownPlaceholder", "Write in Markdown...")
+                      : t("compose.mode.htmlPlaceholder", "Write HTML source...")}
+                    spellCheck={editorMode === "markdown"}
+                    className={`compose-source-input${editorMode === "html" ? " is-code" : ""}`}
                   />
                 )}
               </div>
+              {composeMode === "forward" && forwardedMessageHtml && (
+                <ComposeForwardContext html={forwardedMessageHtml} />
+              )}
+            </div>
+            {isReply && composeReplyTo && (
+              <aside className="compose-context-side">
+                <ComposeReplyContext message={composeReplyTo} />
+              </aside>
             )}
             {isDragging && (
               <div className="compose-drop-overlay">

@@ -18,6 +18,11 @@ const mocks = vi.hoisted(() => ({
   cancelCloseCompose: vi.fn(),
   showComposeLeaveConfirm: false,
   quotedReplyHtml: "",
+  quotedContextHtml: "",
+  quotedContextEmailHtml: "",
+  forwardedMessageHtml: "",
+  composeMode: "new" as string,
+  composeReplyTo: null as unknown,
   accountsQuery: {
     data: [{ id: "account-1", email: "me@example.com", display_name: "Me" }],
     isLoading: false,
@@ -32,7 +37,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (_key: string, fallback?: string) => fallback ?? _key }),
+  useTranslation: () => ({
+    t: (_key: string, fallback?: string | Record<string, unknown>) =>
+      typeof fallback === "string" ? fallback : _key,
+  }),
 }));
 
 vi.mock("../../../src/stores/mail.store", () => ({
@@ -44,15 +52,15 @@ vi.mock("../../../src/stores/compose.store", () => ({
   useComposeStore: Object.assign(
     (selector: (state: {
       composeMode: string;
-      composeReplyTo: null;
+      composeReplyTo: unknown;
       closeCompose: () => void;
       showComposeLeaveConfirm: boolean;
       confirmCloseCompose: () => void;
       cancelCloseCompose: () => void;
     }) => unknown) =>
       selector({
-        composeMode: "new",
-        composeReplyTo: null,
+        composeMode: mocks.composeMode,
+        composeReplyTo: mocks.composeReplyTo,
         closeCompose: mocks.closeCompose,
         showComposeLeaveConfirm: mocks.showComposeLeaveConfirm,
         confirmCloseCompose: mocks.confirmCloseCompose,
@@ -118,9 +126,16 @@ vi.mock("../../../src/hooks/useComposeEditor", () => ({
     switchMode: vi.fn(),
     textareaRef: { current: null },
     quotedReplyHtml: mocks.quotedReplyHtml,
+    forwardedMessageHtml: mocks.forwardedMessageHtml,
+    quotedContextHtml: mocks.quotedContextHtml,
+    quotedContextEmailHtml: mocks.quotedContextEmailHtml,
   }),
   appendReplyQuoteHtml: (bodyHtml: string, quotedReplyHtml: string) =>
     quotedReplyHtml.trim() ? `${bodyHtml}<br/><br/>${quotedReplyHtml.trim()}` : bodyHtml,
+  appendQuotedContextText: (bodyText: string, quotedText: string) =>
+    quotedText.trim() ? `${bodyText}\n\n${quotedText.trim()}` : bodyText,
+  quotedContextText: (html: string) => html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(),
+  buildReplyContextBodyHtml: () => "<p>Original message body</p>",
 }));
 
 vi.mock("../../../src/components/ContactAutocomplete", () => ({
@@ -205,6 +220,21 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+function quotedMessage(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "message-1",
+    subject: "Quarterly review",
+    from_name: "Sender",
+    from_address: "sender@example.com",
+    to_list: [{ name: "Me", address: "me@example.com" }],
+    cc_list: [],
+    date: 1700000000,
+    body_text: "Original message body",
+    body_html_raw: "<p>Original message body</p>",
+    ...overrides,
+  };
+}
+
 describe("ComposeView", () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
 
@@ -221,6 +251,11 @@ describe("ComposeView", () => {
     mocks.cancelCloseCompose.mockReset();
     mocks.showComposeLeaveConfirm = false;
     mocks.quotedReplyHtml = "";
+    mocks.quotedContextHtml = "";
+    mocks.quotedContextEmailHtml = "";
+    mocks.forwardedMessageHtml = "";
+    mocks.composeMode = "new";
+    mocks.composeReplyTo = null;
     mocks.accountsQuery.data = [{ id: "account-1", email: "me@example.com", display_name: "Me" }];
     mocks.accountsQuery.isLoading = false;
     mocks.accountsQuery.isSuccess = true;
@@ -309,17 +344,51 @@ describe("ComposeView", () => {
     ));
   });
 
-  it("keeps quoted replies collapsed until the user expands them", () => {
-    mocks.quotedReplyHtml = "<blockquote><p>Original message body</p></blockquote>";
+  it("keeps the original message visible while replying", () => {
+    mocks.composeMode = "reply";
+    mocks.composeReplyTo = quotedMessage();
 
     render(<ComposeView />);
 
-    expect(screen.getByRole("button", { name: "Show quoted message" })).toBeTruthy();
-    expect(screen.queryByText("Original message body")).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "Show quoted message" }));
-
+    expect(screen.getByLabelText("Original message")).toBeTruthy();
     expect(screen.getByText("Original message body")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Show quoted message" })).toBeNull();
+  });
+
+  it("renders a forwarded message as a distinct card with nested history", () => {
+    mocks.composeMode = "forward";
+    mocks.composeReplyTo = quotedMessage();
+    mocks.forwardedMessageHtml =
+      '<div class="pebble-forward-card">' +
+      '<div class="pebble-forward-card__subject">Quarterly review</div>' +
+      '<div class="pebble-forward-card__body"><p>Latest forwarded body</p>' +
+      '<div class="pebble-forward-history"><p>Earlier forwarded body</p></div>' +
+      "</div></div>";
+
+    render(<ComposeView />);
+
+    expect(screen.getByLabelText("Forwarded message")).toBeTruthy();
+    expect(screen.getByText("Latest forwarded body")).toBeTruthy();
+    expect(screen.getByText("Earlier forwarded body")).toBeTruthy();
+    expect(document.querySelector(".pebble-forward-history")).not.toBeNull();
+  });
+
+  it("appends the quoted context to the outgoing body", async () => {
+    mocks.composeMode = "reply";
+    mocks.composeReplyTo = quotedMessage();
+    mocks.quotedContextHtml = '<blockquote class="compose-original-quote"><p>Original message body</p></blockquote>';
+    mocks.quotedContextEmailHtml = mocks.quotedContextHtml;
+
+    render(<ComposeView />);
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => expect(mocks.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bodyHtml: expect.stringContaining("compose-original-quote"),
+        bodyText: expect.stringContaining("Original message body"),
+      }),
+      expect.any(Object),
+    ));
   });
 
   it("uses the first attached filename as an empty subject", async () => {

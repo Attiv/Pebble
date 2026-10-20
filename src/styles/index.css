@@ -605,7 +605,7 @@ option {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
   text-align: var(--msg-header-align, start);
 }
 
@@ -623,16 +623,44 @@ option {
   color: var(--msg-meta-color, var(--color-text-secondary));
 }
 
+/* Envelope details are a label/value grid, one step down from the sender line
+   and two steps down from the subject: the labels carry the structure, the
+   values stay quiet. */
+.message-detail-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.message-detail-meta-row {
+  display: grid;
+  grid-template-columns: var(--msg-meta-label-width, 42px) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.message-detail-meta-label {
+  font-size: calc(var(--msg-meta-size, 12px) - 1px);
+  line-height: 1.5;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, var(--msg-meta-color, var(--color-text-secondary)) 72%, transparent);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.message-detail-meta-value {
+  min-width: 0;
+}
+
 .message-detail-recipients {
   font-size: var(--msg-meta-size, 12px);
   color: var(--msg-meta-color, var(--color-text-secondary));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.message-detail-recipients > span + span {
-  margin-left: 8px;
 }
 
 .message-detail-contacts {
@@ -742,6 +770,30 @@ option {
 .message-detail-aside .message-detail-from-address {
   display: block;
   margin-left: 0;
+}
+
+/* Centred headers centre the definition list too; a label column with centred
+   values beside it would read as two unrelated fragments. */
+.message-detail-container[data-msg-align="center"] .message-detail-meta {
+  align-items: center;
+}
+
+.message-detail-container[data-msg-align="center"] .message-detail-meta-row {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  gap: 0;
+}
+
+/* A 42px label column would starve the values in a 244px rail, so the labels
+   sit above them there. */
+.message-detail-aside .message-detail-meta-row {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+.message-detail-aside .message-detail-meta-label {
+  font-size: 10px;
+  letter-spacing: 0.05em;
 }
 
 .message-detail-aside .message-detail-recipients {
@@ -930,6 +982,12 @@ textarea:focus-visible {
   margin: 0 auto;
 }
 
+/* A reply gets a second column for the original message. Widening the shell
+   keeps the editor itself usable instead of squeezing it. */
+.compose-form-shell--with-context {
+  max-width: 1180px;
+}
+
 .compose-editor-toolbar-row {
   flex: 0 0 auto;
   display: flex;
@@ -1074,6 +1132,43 @@ textarea:focus-visible {
   background: color-mix(in srgb, var(--color-bg) 98%, var(--color-bg-secondary));
 }
 
+.compose-editor-column {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Side-by-side reply layout: editor on the left, the message being answered on
+   the right. It stays in view while the editor is being used. */
+.compose-editor-area--with-context {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.compose-context-side {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.compose-context-side .compose-context-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.compose-context-side .compose-context-body {
+  flex: 1 1 auto;
+  max-height: 520px;
+}
+
 .compose-editor-surface {
   min-height: 320px;
   flex: 1 1 auto;
@@ -1182,65 +1277,232 @@ textarea:focus-visible {
   pointer-events: none;
 }
 
-.compose-quoted-reply {
+/* ─── Original / forwarded context in compose ───────────── */
+
+/* The message being replied to. Always present above the editor, so the reader
+   never has to hide the composer to check what they are answering. */
+.compose-context-card {
   flex: 0 0 auto;
-  margin-top: 12px;
+  margin: 2px 0 12px;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--color-bg) 94%, var(--color-bg-secondary));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-bg) 96%, var(--color-bg-secondary));
   overflow: hidden;
 }
 
-.compose-quoted-reply-toggle {
-  width: 100%;
-  min-height: 34px;
+.compose-context-card__header {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 12px;
-  border: 0;
-  background: transparent;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  text-align: left;
-  transition: background-color 0.14s ease, color 0.14s ease;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-bg-secondary) 52%, var(--color-bg));
 }
 
-.compose-quoted-reply-toggle:hover {
-  background: var(--color-bg-hover);
+.compose-context-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 3px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg));
+  color: color-mix(in srgb, var(--color-accent) 72%, var(--color-text-primary));
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.compose-context-subject {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
   color: var(--color-text-primary);
 }
 
-.compose-quoted-reply-toggle svg {
-  flex: 0 0 auto;
+.compose-context-meta {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
 }
 
-.compose-quoted-reply-content {
-  max-height: 240px;
+.compose-context-body {
+  max-height: 210px;
   overflow: auto;
   padding: 12px 14px;
-  border-top: 1px solid var(--color-border);
-  color: var(--color-text-secondary);
+  color: var(--color-text-primary);
   font-size: 13px;
-  line-height: 1.55;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
   user-select: text;
 }
 
-.compose-quoted-reply-content blockquote {
-  margin: 0;
+.compose-context-body p {
+  margin: 0 0 8px;
+}
+
+.compose-context-body p:last-child {
+  margin-bottom: 0;
+}
+
+.compose-context-body img {
+  max-width: 100%;
+  height: auto;
+}
+
+.compose-context-body table {
+  max-width: 100%;
+}
+
+.compose-context-body blockquote {
+  margin: 8px 0;
   padding-left: 12px;
   border-left: 3px solid color-mix(in srgb, var(--color-text-secondary) 24%, transparent);
 }
 
-.compose-quoted-reply-content p {
-  margin: 0 0 10px;
+/* The replied-to mail can itself be a forward; the panel keeps the same
+   "one rail per older hop" cue as the reader. */
+.compose-context-body .pebble-forward-history {
+  margin-top: 10px;
+  padding-left: 10px;
+  border-left: 2px solid color-mix(in srgb, var(--color-text-secondary) 26%, transparent);
 }
 
-.compose-quoted-reply-content p:last-child {
+.compose-context-body .pebble-forward-history__label {
+  display: inline-block;
+  margin-bottom: 4px;
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* The forwarded message: one card per forward, with the body on its own rail.
+   Nested history gets a second rail, then a third, so depth is visible at a
+   glance instead of every level looking identical. */
+.compose-forward-context {
+  flex: 0 0 auto;
+  margin-top: 14px;
+}
+
+.compose-forward-context .pebble-forward-card {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg);
+  overflow: hidden;
+}
+
+.compose-forward-context .pebble-forward-card__header {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-bg-secondary) 60%, var(--color-bg));
+}
+
+.compose-forward-context .pebble-forward-badge {
+  display: inline-block;
+  margin-bottom: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-accent) 13%, var(--color-bg));
+  color: color-mix(in srgb, var(--color-accent) 72%, var(--color-text-primary));
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.compose-forward-context .pebble-forward-card__subject {
+  margin-bottom: 3px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--color-text-primary);
+}
+
+.compose-forward-context .pebble-forward-card__meta {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.compose-forward-context .pebble-forward-card__body {
+  max-height: 420px;
+  overflow: auto;
+  padding: 14px 16px;
+  border-left: 3px solid color-mix(in srgb, var(--color-accent) 55%, var(--color-border));
+  color: var(--color-text-primary);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.compose-forward-context .pebble-forward-card__body p {
+  margin: 0 0 8px;
+}
+
+.compose-forward-context .pebble-forward-card__body p:last-child {
   margin-bottom: 0;
+}
+
+.compose-forward-context .pebble-forward-card__body img {
+  max-width: 100%;
+  height: auto;
+}
+
+.compose-forward-context .pebble-forward-card__body table {
+  max-width: 100%;
+}
+
+.compose-forward-context .pebble-forward-card__body .pebble-forward-card {
+  margin-top: 14px;
+}
+
+.compose-forward-context .pebble-forward-history {
+  margin-top: 14px;
+  padding: 8px 0 2px 12px;
+  border-left: 2px solid color-mix(in srgb, var(--color-text-secondary) 26%, transparent);
+}
+
+.compose-forward-context .pebble-forward-history .pebble-forward-history {
+  margin-left: 8px;
+  padding-right: 8px;
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--color-bg-secondary) 46%, transparent);
+}
+
+.compose-forward-context .pebble-forward-history__label {
+  display: inline-block;
+  margin-bottom: 6px;
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 980px) {
+  .compose-form-shell--with-context {
+    max-width: 920px;
+  }
+
+  .compose-editor-area--with-context {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .compose-context-side {
+    order: -1;
+  }
+
+  .compose-context-side .compose-context-body {
+    flex: 0 1 auto;
+    max-height: 190px;
+  }
 }
 
 @media (max-width: 720px) {

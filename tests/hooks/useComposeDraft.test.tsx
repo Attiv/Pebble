@@ -140,6 +140,26 @@ describe("useComposeDraft", () => {
     }));
   });
 
+  it("keeps quoted context in the autosaved draft", async () => {
+    saveDraftMock.mockResolvedValue("draft-1");
+
+    renderHook(() => useComposeDraft(baseProps({
+      subject: "Re: Quarterly review",
+      richTextHtml: "<p>My reply</p>",
+      contextHtml: "<blockquote><p>Original message</p></blockquote>",
+      contextText: "Original message",
+    })));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+
+    expect(saveDraftMock).toHaveBeenCalledWith(expect.objectContaining({
+      bodyHtml: expect.stringContaining("Original message"),
+      bodyText: expect.stringContaining("Original message"),
+    }));
+  });
+
   it("gives a newer snapshot a fresh retry budget when it arrives during retry sleep", async () => {
     saveDraftMock.mockRejectedValue(new Error("provider unavailable"));
     const { rerender } = renderHook((props) => useComposeDraft(props), {

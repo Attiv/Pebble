@@ -94,6 +94,10 @@ interface UseComposeDraftArgs {
   composeMode: string | null;
   fromAccountId: string | null;
   attachments: ComposeAttachment[];
+  /** Quoted/forwarded content shown alongside the editor. Kept out of the
+   * editor state, so drafts need it explicitly to avoid losing the context. */
+  contextHtml?: string;
+  contextText?: string;
   /** The current compose was restored from legacy WebView storage. */
   migrateLegacyDraft?: boolean;
   /** True once the TipTap editor has mounted and populated richTextHtml with
@@ -105,6 +109,8 @@ interface UseComposeDraftArgs {
 
 export function useComposeDraft({
   to, cc, bcc, subject, rawSource, richTextHtml, editorMode, composeMode, fromAccountId, attachments, editorReady,
+  contextHtml = "",
+  contextText = "",
   migrateLegacyDraft = false,
 }: UseComposeDraftArgs) {
   // Snapshot the initial compose state so pre-populated reply/forward
@@ -295,22 +301,30 @@ export function useComposeDraft({
         {
           // Pick body source based on current editor mode to avoid stale content.
           // For rich text, strip HTML tags to produce a plain-text fallback.
-          const bodyText = editorMode === "rich"
+          const baseBodyText = editorMode === "rich"
             ? richTextHtml.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim()
             : rawSource;
+          const bodyText = contextText.trim()
+            ? `${baseBodyText.trim()}\n\n${contextText.trim()}`.trim()
+            : baseBodyText;
           const bodyHtml = editorMode === "rich" ? richTextHtml : (editorMode === "html" ? rawSource : undefined);
+          // The quoted/forwarded block is rendered outside the editor; without
+          // this the autosaved draft would quietly drop the original message.
+          const bodyHtmlWithContext = bodyHtml
+            ? [bodyHtml, contextHtml.trim()].filter(Boolean).join("<br/><br/>")
+            : undefined;
           queueDraftSave({
             accountId: accountIdAtSave,
             to, cc, bcc, subject,
             bodyText,
-            bodyHtml: bodyHtml || undefined,
+            bodyHtml: bodyHtmlWithContext || undefined,
             attachmentPaths: draftAttachments.map((attachment) => attachment.path).filter(Boolean),
           });
         }
       }
     }, 3000);
     return () => clearTimeout(timer);
-  }, [attachments, to, cc, bcc, subject, rawSource, richTextHtml, editorMode, composeMode, fromAccountId, editorReady]);
+  }, [attachments, to, cc, bcc, subject, rawSource, richTextHtml, editorMode, composeMode, fromAccountId, editorReady, contextHtml, contextText]);
 
   return { draftIdRef, draftIdsByAccountRef, cancelPendingDraftSaves };
 }

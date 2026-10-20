@@ -99,6 +99,12 @@
     "forwardedHeader": "---------- 转发邮件 ----------",
     "forwardedFrom": "发件人：{{sender}}",
     "forwardedSubject": "主题：{{subject}}",
+    "forwardedMessage": "转发邮件",
+    "forwardedHistory": "历史邮件",
+    "forwardedDate": "日期：{{date}}",
+    "forwardedTo": "收件人：{{recipients}}",
+    "forwardedCc": "抄送：{{recipients}}",
+    "originalMessage": "原邮件",
     "attach": "添加附件",
     "dropFiles": "拖放文件以添加附件",
     "templates": "模板",
@@ -888,8 +894,13 @@
   },
   "messageDetail": {
     "body": "邮件正文",
-    "to": "收件人：",
-    "cc": "抄送："
+    "to": "收件人",
+    "cc": "抄送",
+    "from": "发件人",
+    "date": "日期",
+    "forwardedMessage": "转发邮件",
+    "forwardedHistory": "历史邮件",
+    "quotedMessage": "引用邮件"
   },
   "messageThemes": {
     "title": "邮件详情主题",

@@ -6,8 +6,11 @@ import { Markdown as MarkdownExtension } from "tiptap-markdown";
 import TurndownService from "turndown";
 import { getSignature } from "@/lib/signatures";
 import { sanitizeComposeQuoteHtml } from "@/lib/sanitizeHtml";
+import { isForwardedMessageMarker } from "@/lib/forwardMarkers";
 import type { Message } from "@/lib/ipc-types";
 import type { TFunction } from "i18next";
+
+export { isForwardedMessageMarker } from "@/lib/forwardMarkers";
 
 export type EditorMode = "rich" | "markdown" | "html";
 
@@ -33,7 +36,18 @@ interface BuildComposeEditorContentArgs {
   isReply: boolean;
   signatureHtml: string;
   prefillBody?: string;
+}
+
+interface ForwardHistoryOptions {
+  label: string;
+  /** Inline the whole visual treatment so mail clients keep the hierarchy. */
+  inlineStyles?: boolean;
+}
+
+interface BuildForwardMessageHtmlArgs {
+  composeReplyTo: Message | null;
   t: TFunction;
+  inlineStyles?: boolean;
 }
 
 interface BuildReplyQuoteHtmlArgs {
@@ -104,19 +118,17 @@ export function buildComposeEditorContent({
   isReply,
   signatureHtml,
   prefillBody,
-  t,
 }: BuildComposeEditorContentArgs) {
   try {
     if (isReply && composeReplyTo) {
       return `<p><br></p>${signatureHtml}`;
     }
     if (composeMode === "forward" && composeReplyTo) {
-      const sender = escapeHtml(composeReplyTo.from_name || composeReplyTo.from_address || "");
-      const fwdSubject = escapeHtml(composeReplyTo.subject || "");
-      const body = composeReplyTo.body_html_raw
-        ? extractComposeBodyHtml(composeReplyTo.body_html_raw)
-        : `<p>${escapeHtml(composeReplyTo.body_text || "")}</p>`;
-      return `${signatureHtml}<br/><br/><p>${escapeHtml(t("compose.forwardedHeader"))}</p><p>${escapeHtml(t("compose.forwardedFrom", { sender }))}</p><p>${escapeHtml(t("compose.forwardedSubject", { subject: fwdSubject }))}</p>${body}`;
+      // The forwarded message lives in its own read-only card below the editor.
+      // Keeping it out of the TipTap document is what lets it keep its
+      // structure (tables, nested history) and keeps the user's note at the
+      // top level instead of flattened into the quoted content.
+      return `<p><br></p>${signatureHtml}`;
     }
     if (composeMode === "new" && prefillBody?.trim()) {
       return `${plainTextToParagraphs(prefillBody)}${signatureHtml}`;
@@ -128,17 +140,262 @@ export function buildComposeEditorContent({
   }
 }
 
+function formatQuotedDate(seconds: number): string {
+  if (!seconds || !Number.isFinite(seconds)) return "";
+  return new Date(seconds * 1000).toLocaleString();
+}
+
+function formatAddressList(list: Message["to_list"]): string {
+  return list
+    .map((entry) => entry.name?.trim() ? `${entry.name.trim()} <${entry.address}>` : entry.address)
+    .filter(Boolean)
+    .join(", ");
+}
+
+// The same visual language as the reader's card (`forwardCardCss.ts`), in
+// inline form: what Pebble sends has to survive mail clients that know
+// nothing of our stylesheet.
+const FORWARD_CARD_STYLE = [
+  "margin:20px 0 0",
+  "border:1px solid #e2e8f0",
+  "border-radius:12px",
+  "overflow:hidden",
+  "background:#ffffff",
+].join(";");
+
+const FORWARD_HEADER_STYLE = [
+  "padding:14px 18px 15px",
+  "background:#f1f5fa",
+  "background:linear-gradient(180deg,#f8fafd 0%,#eef3f9 100%)",
+  "border-bottom:1px solid #e4eaf2",
+].join(";");
+
+const FORWARD_BADGE_STYLE = [
+  "display:inline-block",
+  "margin:0 0 7px",
+  "padding:3px 10px",
+  "border:1px solid #d3dff2",
+  "border-radius:999px",
+  "background:#e7eefb",
+  "color:#33507a",
+  "font-size:10px",
+  "font-weight:700",
+  "letter-spacing:0.09em",
+  "text-transform:uppercase",
+].join(";");
+
+const FORWARD_SUBJECT_STYLE = [
+  "margin:0 0 6px",
+  "font-size:15px",
+  "font-weight:600",
+  "line-height:1.4",
+  "color:#111827",
+].join(";");
+
+const FORWARD_META_STYLE = [
+  "margin:0",
+  "font-size:12px",
+  "line-height:1.6",
+  "color:#475467",
+].join(";");
+
+const FORWARD_BODY_STYLE = [
+  "padding:16px 18px 18px",
+  "color:#1f2937",
+  "font-size:14px",
+  "line-height:1.62",
+].join(";");
+
+const FORWARD_HISTORY_STYLE = [
+  "margin:18px 0 0",
+  "padding:10px 0 2px 14px",
+  "border-left:2px solid #dbe2ed",
+].join(";");
+
+const FORWARD_HISTORY_LABEL_STYLE = [
+  "display:inline-block",
+  "margin:0 0 8px",
+  "font-size:11px",
+  "font-weight:700",
+  "letter-spacing:0.08em",
+  "text-transform:uppercase",
+  "color:#97a1b2",
+].join(";");
+
+function styleAttribute(inlineStyles: boolean | undefined, css: string): string {
+  return inlineStyles ? ` style="${css}"` : "";
+}
+
+function wrapForwardHistorySection(marker: Element, options: ForwardHistoryOptions) {
+  const parent = marker.parentNode;
+  if (!parent) return;
+
+  const doc = marker.ownerDocument;
+  const wrapper = doc.createElement("div");
+  wrapper.className = "pebble-forward-history";
+  if (options.inlineStyles) wrapper.setAttribute("style", FORWARD_HISTORY_STYLE);
+
+  parent.insertBefore(wrapper, marker);
+  let node: Node | null = marker;
+  while (node) {
+    const next: Node | null = node.nextSibling;
+    wrapper.appendChild(node);
+    node = next;
+  }
+
+  const label = doc.createElement("span");
+  label.className = "pebble-forward-history__label";
+  if (options.inlineStyles) label.setAttribute("style", FORWARD_HISTORY_LABEL_STYLE);
+  label.textContent = options.label;
+  marker.replaceWith(label);
+}
+
+/**
+ * A forward card that is already inside the message body describes an older
+ * hop in the chain. Wrap it in the same history shell as a flattened divider so
+ * re-forwarding a Pebble forward keeps the newest card on top and the older one
+ * one level down.
+ */
+function wrapForwardCardInHistory(card: Element, options: ForwardHistoryOptions) {
+  const parent = card.parentNode;
+  if (!parent) return;
+
+  const doc = card.ownerDocument;
+  const wrapper = doc.createElement("div");
+  wrapper.className = "pebble-forward-history";
+  if (options.inlineStyles) wrapper.setAttribute("style", FORWARD_HISTORY_STYLE);
+
+  const label = doc.createElement("span");
+  label.className = "pebble-forward-history__label";
+  if (options.inlineStyles) label.setAttribute("style", FORWARD_HISTORY_LABEL_STYLE);
+  label.textContent = options.label;
+
+  parent.insertBefore(wrapper, card);
+  wrapper.appendChild(label);
+  wrapper.appendChild(card);
+}
+
+/**
+ * Rebuild hierarchy for forward chains that were flattened into one level.
+ *
+ * Older builds pasted a forwarded message as a run of sibling paragraphs
+ * (`---------- 转发邮件 ----------`, `发件人：…`, body, next divider …). Every
+ * divider and everything after it becomes a nested block, so a chain of three
+ * forwards ends up as three nested levels instead of one undifferentiated wall
+ * of text. Blocks produced by this build already carry markers/classes and are
+ * left as they are.
+ */
+export function structureForwardHistory(html: string, options: ForwardHistoryOptions): string {
+  if (!html) return html;
+  try {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const root = doc.body;
+    const candidates = Array.from(root.querySelectorAll<HTMLElement>(
+      "p, div, span, font, b, strong, em, i, td, th, blockquote, section, article, center, " +
+      "h1, h2, h3, h4, h5, h6",
+    ));
+    let markers = candidates.filter((element) => isForwardedMessageMarker(element.textContent ?? ""));
+    // When a wrapper and the text node inside it both match (e.g. <p><b>…</b></p>),
+    // keep the outermost element so the block that follows it is included.
+    markers = markers.filter(
+      (marker) => !markers.some((other) => other !== marker && other.contains(marker)),
+    );
+    for (const marker of markers) {
+      wrapForwardHistorySection(marker, options);
+    }
+
+    // Cards produced by this build describe an older hop when they appear
+    // inside another message's body. Give them the same history shell so
+    // re-forwarding never leaves two visually identical levels.
+    const embeddedCards = Array.from(root.querySelectorAll(".pebble-forward-card"))
+      .filter((card) => !card.parentElement?.closest(".pebble-forward-history"));
+    for (const card of embeddedCards) {
+      wrapForwardCardInHistory(card, options);
+    }
+
+    if (markers.length === 0 && embeddedCards.length === 0) return html;
+    return root.innerHTML;
+  } catch {
+    return html;
+  }
+}
+
+function quotedMessageBodyHtml(message: Message): string {
+  return message.body_html_raw
+    ? extractComposeBodyHtml(message.body_html_raw)
+    : `<p>${escapeHtml(message.body_text || "")}</p>`;
+}
+
+/** Body of the original message, ready to be shown next to the reply editor. */
+export function buildReplyContextBodyHtml(message: Message, historyLabel: string): string {
+  return structureForwardHistory(quotedMessageBodyHtml(message), {
+    label: historyLabel,
+    inlineStyles: false,
+  });
+}
+
+/**
+ * The forwarded message as a self-contained card: header (label, subject,
+ * sender, date, recipients) plus an indented body. The card is the "latest"
+ * level; any forward chain already inside the body becomes a nested
+ * `.pebble-forward-history`, visibly subordinate to it.
+ */
+export function buildForwardMessageHtml({
+  composeReplyTo,
+  t,
+  inlineStyles = false,
+}: BuildForwardMessageHtmlArgs): string {
+  if (!composeReplyTo) return "";
+
+  const from = composeReplyTo.from_name?.trim()
+    ? `${composeReplyTo.from_name.trim()} <${composeReplyTo.from_address}>`
+    : (composeReplyTo.from_address || "");
+  const subject = escapeHtml(composeReplyTo.subject || "");
+  const date = formatQuotedDate(composeReplyTo.date);
+  const to = formatAddressList(composeReplyTo.to_list);
+  const cc = formatAddressList(composeReplyTo.cc_list);
+  const badge = escapeHtml(t("compose.forwardedMessage", "Forwarded message"));
+  const body = structureForwardHistory(quotedMessageBodyHtml(composeReplyTo), {
+    label: t("compose.forwardedHistory", "Earlier message"),
+    inlineStyles,
+  });
+
+  const metaLines = [
+    t("compose.forwardedFrom", { sender: from }),
+    date ? t("compose.forwardedDate", { date }) : "",
+    to ? t("compose.forwardedTo", { recipients: to }) : "",
+    cc ? t("compose.forwardedCc", { recipients: cc }) : "",
+  ].filter(Boolean).map(escapeHtml);
+
+  return [
+    `<div class="pebble-forward-card"${styleAttribute(inlineStyles, FORWARD_CARD_STYLE)}>`,
+    `<div class="pebble-forward-card__header"${styleAttribute(inlineStyles, FORWARD_HEADER_STYLE)}>`,
+    `<div class="pebble-forward-badge"${styleAttribute(inlineStyles, FORWARD_BADGE_STYLE)}>${badge}</div>`,
+    subject
+      ? `<div class="pebble-forward-card__subject"${styleAttribute(inlineStyles, FORWARD_SUBJECT_STYLE)}>${subject}</div>`
+      : "",
+    ...metaLines.map((line) =>
+      `<div class="pebble-forward-card__meta"${styleAttribute(inlineStyles, FORWARD_META_STYLE)}>${line}</div>`),
+    `</div>`,
+    `<div class="pebble-forward-card__body"${styleAttribute(inlineStyles, FORWARD_BODY_STYLE)}>${body}</div>`,
+    `</div>`,
+  ].join("");
+}
+
 export function buildReplyQuoteHtml({ composeReplyTo, t }: BuildReplyQuoteHtmlArgs) {
   if (!composeReplyTo) return "";
 
-  const sender = escapeHtml(composeReplyTo.from_name || composeReplyTo.from_address || "");
-  const dateStr = escapeHtml(new Date((composeReplyTo.date || 0) * 1000).toLocaleString());
-  const body = composeReplyTo.body_html_raw
-    ? extractComposeBodyHtml(composeReplyTo.body_html_raw)
-    : `<p>${escapeHtml(composeReplyTo.body_text || "")}</p>`;
-  const attribution = t("compose.quoteAttribution", { date: dateStr, sender });
+  const sender = composeReplyTo.from_name || composeReplyTo.from_address || "";
+  const dateStr = formatQuotedDate(composeReplyTo.date);
+  const body = structureForwardHistory(quotedMessageBodyHtml(composeReplyTo), {
+    label: t("compose.forwardedHistory", "Earlier message"),
+    inlineStyles: true,
+  });
+  const attribution = escapeHtml(
+    t("compose.quoteAttribution", { date: dateStr, sender }),
+  );
 
-  return `<blockquote class="compose-original-quote"><p>${escapeHtml(attribution)}</p>${body}</blockquote>`;
+  return `<blockquote class="compose-original-quote" style="margin:16px 0 0;padding:0 0 0 12px;border-left:3px solid #d5dbe3;color:#667085"><p>${attribution}</p>${body}</blockquote>`;
 }
 
 export function appendReplyQuoteHtml(bodyHtml: string, quotedReplyHtml: string) {
@@ -146,6 +403,27 @@ export function appendReplyQuoteHtml(bodyHtml: string, quotedReplyHtml: string) 
   if (!quote) return bodyHtml;
   const body = bodyHtml.trim() || "<p><br></p>";
   return `${body}<br/><br/>${quote}`;
+}
+
+/** Plain-text mirror of quoted content, for the message's text/plain part. */
+export function quotedContextText(html: string): string {
+  if (!html.trim()) return "";
+  try {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    return (doc.body.textContent ?? "")
+      .replace(/\u00a0/g, " ")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  } catch {
+    return "";
+  }
+}
+
+export function appendQuotedContextText(bodyText: string, quotedText: string) {
+  const quote = quotedText.trim();
+  if (!quote) return bodyText;
+  return bodyText.trim() ? `${bodyText.trim()}\n\n${quote}` : quote;
 }
 
 export function shouldApplyInitialEditorContent({
@@ -207,11 +485,23 @@ export function useComposeEditor({
   }, [signature]);
 
   const editorContent = useMemo(() => {
-    return buildComposeEditorContent({ composeMode, composeReplyTo, isReply, signatureHtml, prefillBody, t });
-  }, [composeMode, composeReplyTo, isReply, t, signatureHtml, prefillBody]);
+    return buildComposeEditorContent({ composeMode, composeReplyTo, isReply, signatureHtml, prefillBody });
+  }, [composeMode, composeReplyTo, isReply, signatureHtml, prefillBody]);
   const quotedReplyHtml = useMemo(() => {
     return isReply ? buildReplyQuoteHtml({ composeReplyTo, t }) : "";
   }, [composeReplyTo, isReply, t]);
+  const forwardedMessageHtml = useMemo(() => {
+    return composeMode === "forward"
+      ? buildForwardMessageHtml({ composeReplyTo, t, inlineStyles: false })
+      : "";
+  }, [composeMode, composeReplyTo, t]);
+  const forwardedMessageEmailHtml = useMemo(() => {
+    return composeMode === "forward"
+      ? buildForwardMessageHtml({ composeReplyTo, t, inlineStyles: true })
+      : "";
+  }, [composeMode, composeReplyTo, t]);
+  const quotedContextHtml = isReply ? quotedReplyHtml : forwardedMessageHtml;
+  const quotedContextEmailHtml = isReply ? quotedReplyHtml : forwardedMessageEmailHtml;
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -240,8 +530,11 @@ export function useComposeEditor({
     if (isReply && !restoredDraft) {
       requestAnimationFrame(() => editor.commands.focus("start"));
     }
+    if (composeMode === "forward" && !restoredDraft) {
+      requestAnimationFrame(() => editor.commands.focus("start"));
+    }
     contentInitializedRef.current = true;
-  }, [editor, editorContent, isReply, restoredDraft, signatureReady]);
+  }, [editor, editorContent, isReply, composeMode, restoredDraft, signatureReady]);
 
   useEffect(() => {
     if (!editor) {
@@ -299,5 +592,10 @@ export function useComposeEditor({
     switchMode,
     textareaRef,
     quotedReplyHtml,
+    forwardedMessageHtml,
+    /** Preview/HTML used for AI context and the read-only panel. */
+    quotedContextHtml,
+    /** Email-safe variant appended to the outgoing body and saved drafts. */
+    quotedContextEmailHtml,
   };
 }

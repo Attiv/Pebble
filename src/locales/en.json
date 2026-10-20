@@ -99,6 +99,12 @@
     "forwardedHeader": "---------- Forwarded message ----------",
     "forwardedFrom": "From: {{sender}}",
     "forwardedSubject": "Subject: {{subject}}",
+    "forwardedMessage": "Forwarded message",
+    "forwardedHistory": "Earlier message",
+    "forwardedDate": "Date: {{date}}",
+    "forwardedTo": "To: {{recipients}}",
+    "forwardedCc": "Cc: {{recipients}}",
+    "originalMessage": "Original message",
     "attach": "Attach file",
     "dropFiles": "Drop files to attach",
     "templates": "Templates",
@@ -888,8 +894,13 @@
   },
   "messageDetail": {
     "body": "Message body",
-    "to": "To:",
-    "cc": "Cc:"
+    "to": "To",
+    "cc": "Cc",
+    "from": "From",
+    "date": "Date",
+    "forwardedMessage": "Forwarded message",
+    "forwardedHistory": "Earlier message",
+    "quotedMessage": "Quoted message"
   },
   "messageThemes": {
     "title": "Message theme",
