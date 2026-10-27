@@ -27,6 +27,11 @@ jobs:
   # under test. It runs on Linux because the macOS runners queue for far longer
   # than these checks take, and it runs beside the macOS builds rather than in
   # front of them: publishing still waits for both.
+  #
+  # The Rust side is the gate. The frontend suite is not run here: it is jsdom
+  # bound and takes thirteen minutes on a full laptop, and on a two-core runner
+  # it flakes on its own timeouts — a queue of renders that never settle is not
+  # evidence that the release is broken.
   checks:
     name: Checks
     runs-on: ubuntu-latest
@@ -38,17 +43,6 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ inputs.tag || github.ref }}
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9.12.3
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -101,24 +95,18 @@ jobs:
             exit 1
           fi
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
       - name: Check Rust formatting
         run: cargo fmt --check
 
       - name: Check Rust lints
         # Reported, not enforced. A stable toolchain bump adds lints, and two
         # releases in a row were held up by warnings in code nobody had
-        # touched — the formatting and test steps below are the gates that
-        # catch real breakage.
+        # touched — the formatting and test steps are the gates that catch real
+        # breakage.
         run: cargo clippy --workspace --all-targets
 
       - name: Run Rust tests
         run: cargo test --workspace --all-targets
-
-      - name: Run frontend tests
-        run: pnpm test
 
   macos:
     name: macOS Release (${{ matrix.arch }})

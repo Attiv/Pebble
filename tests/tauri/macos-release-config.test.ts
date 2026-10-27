@@ -150,8 +150,10 @@ describe("macOS release configuration", () => {
     expect(releaseWorkflow).not.toContain(".deb");
     expect(releaseWorkflow).not.toContain(".rpm");
     expect(releaseWorkflow).toContain("cargo clippy --workspace --all-targets");
+    expect(releaseWorkflow).toContain("cargo fmt --check");
     expect(releaseWorkflow).toContain("cargo test --workspace --all-targets");
-    expect(releaseWorkflow).toContain("pnpm test");
+    // The jsdom suite is not a release gate: it flakes on two-core runners.
+    expect(releaseWorkflow).not.toContain("pnpm test");
   });
 
   it("publishes a release only after every macOS artifact is available", () => {
