@@ -134,26 +134,28 @@ describe("macOS release configuration", () => {
     expect(releaseWorkflow).toContain("pebble-macos-${{ matrix.arch }}-${{ env.PEBBLE_VERSION }}");
   });
 
-  it("uploads Linux package artifacts during tagged releases", () => {
+  it("releases macOS bundles only, with the checks job gating the build", () => {
     const releaseWorkflow = readFileSync(
       resolve(process.cwd(), ".github", "workflows", "release.yml"),
       "utf8",
     );
 
-    expect(releaseWorkflow).toContain("Linux Package Release");
-    expect(releaseWorkflow).toContain("runs-on: ubuntu-latest");
-    expect(releaseWorkflow).toContain("Install Linux system dependencies");
-    expect(releaseWorkflow).toContain("pnpm build:linux");
-    expect(releaseWorkflow).toContain("target/release/bundle/appimage");
-    expect(releaseWorkflow).toContain("target/release/bundle/deb");
-    expect(releaseWorkflow).toContain("target/release/bundle/rpm");
-    expect(releaseWorkflow).toContain("*.AppImage");
-    expect(releaseWorkflow).toContain("*.deb");
-    expect(releaseWorkflow).toContain("*.rpm");
-    expect(releaseWorkflow).toContain("pebble-linux-packages-${{ env.PEBBLE_VERSION }}");
+    // The release ships the two macOS DMGs and nothing else: no Windows
+    // installer and no Linux packages.
+    expect(releaseWorkflow).toContain("name: Checks");
+    expect(releaseWorkflow).not.toContain("Windows Release");
+    expect(releaseWorkflow).not.toContain("Linux Package Release");
+    expect(releaseWorkflow).not.toContain("nsis");
+    expect(releaseWorkflow).not.toContain("appimage");
+    expect(releaseWorkflow).not.toContain(".deb");
+    expect(releaseWorkflow).not.toContain(".rpm");
+    expect(releaseWorkflow).toContain("needs: checks");
+    expect(releaseWorkflow).toContain("cargo clippy --workspace --all-targets -- -D warnings");
+    expect(releaseWorkflow).toContain("cargo test --workspace --all-targets");
+    expect(releaseWorkflow).toContain("pnpm test");
   });
 
-  it("publishes a release only after every platform artifact is available", () => {
+  it("publishes a release only after every macOS artifact is available", () => {
     const releaseWorkflow = readFileSync(
       resolve(process.cwd(), ".github", "workflows", "release.yml"),
       "utf8",
@@ -161,12 +163,9 @@ describe("macOS release configuration", () => {
     const publishIndex = releaseWorkflow.indexOf("\n  publish:");
 
     expect(publishIndex).toBeGreaterThan(0);
-    expect(releaseWorkflow).toContain("needs: [windows, linux, macos]");
+    expect(releaseWorkflow).toContain("needs: [checks, macos]");
     expect(releaseWorkflow).toContain("actions/download-artifact@v4");
     expect(releaseWorkflow).toContain("merge-multiple: true");
-    expect(releaseWorkflow).toContain("appimages=(release-artifacts/*.AppImage)");
-    expect(releaseWorkflow).toContain("debs=(release-artifacts/*.deb)");
-    expect(releaseWorkflow).toContain("rpms=(release-artifacts/*.rpm)");
     expect(releaseWorkflow).toContain("macos_arm=(release-artifacts/*-arm64.dmg)");
     expect(releaseWorkflow).toContain("macos_x64=(release-artifacts/*-x64.dmg)");
     expect(releaseWorkflow).toContain("sha256sum --check --strict *.sha256");

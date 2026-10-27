@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag to build, for example v0.1.5
+        description: Release tag to build, for example v0.1.7
         required: true
         default: v0.1.7
 
@@ -22,141 +22,12 @@ permissions:
   contents: write
 
 jobs:
-  windows:
-    name: Windows Release
-    runs-on: windows-latest
-    environment: action
-
-    defaults:
-      run:
-        shell: pwsh
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ inputs.tag || github.ref }}
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9.12.3
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-
-      - name: Validate release version
-        run: |
-          $ErrorActionPreference = "Stop"
-          $tag = $env:RELEASE_TAG
-          if ($tag -notmatch '^v(?<version>\d+\.\d+\.\d+)$') {
-            throw "Release tags must use vMAJOR.MINOR.PATCH, got '$tag'."
-          }
-          $version = $Matches.version
-
-          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $tauriVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
-          $cargoToml = Get-Content src-tauri/Cargo.toml -Raw
-          if ($cargoToml -notmatch '(?m)^version\s*=\s*"(?<version>[^"]+)"') {
-            throw "Could not read src-tauri/Cargo.toml package version."
-          }
-          $cargoVersion = $Matches.version
-
-          $versions = @{
-            "package.json" = $packageVersion
-            "src-tauri/tauri.conf.json" = $tauriVersion
-            "src-tauri/Cargo.toml" = $cargoVersion
-          }
-          foreach ($entry in $versions.GetEnumerator()) {
-            if ($entry.Value -ne $version) {
-              throw "$($entry.Key) version '$($entry.Value)' does not match tag '$tag'."
-            }
-          }
-          "PEBBLE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-      - name: Validate OAuth build config
-        env:
-          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
-          MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          foreach ($name in @("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "MICROSOFT_CLIENT_ID")) {
-            $value = [Environment]::GetEnvironmentVariable($name)
-            if ([string]::IsNullOrWhiteSpace($value)) {
-              throw "$name is not configured in the 'action' GitHub environment."
-            }
-          }
-          "OAuth client IDs and Google client secret are configured for this release build."
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Check Rust formatting
-        run: cargo fmt --check
-
-      - name: Check Rust lints
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: Run Rust tests
-        run: cargo test --workspace --all-targets
-
-      - name: Run frontend tests
-        run: pnpm test
-
-      - name: Build Windows installer
-        env:
-          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
-          MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
-        run: pnpm build:windows
-
-      - name: Collect release artifacts
-        run: |
-          $ErrorActionPreference = "Stop"
-          $artifactDir = "release-artifacts"
-          New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
-
-          $installers = Get-ChildItem -Path "target/release/bundle/nsis" -Filter "*.exe" -File
-          if ($installers.Count -eq 0) {
-            throw "No NSIS installer found in target/release/bundle/nsis."
-          }
-
-          foreach ($installer in $installers) {
-            Copy-Item -Path $installer.FullName -Destination $artifactDir
-          }
-
-          Get-ChildItem -Path $artifactDir -File | ForEach-Object {
-            $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            "$hash  $($_.Name)" | Set-Content -Path "$($_.FullName).sha256" -Encoding ascii
-          }
-
-          Get-ChildItem -Path $artifactDir -File | Select-Object Name, Length
-
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: pebble-windows-${{ env.PEBBLE_VERSION }}
-          path: release-artifacts/*
-          if-no-files-found: error
-
-  linux:
-    name: Linux Package Release
-    runs-on: ubuntu-latest
+  # The gates the Windows job used to carry. They live in their own job so the
+  # macOS builds do not start until the code is known to be formatted, lint
+  # clean and covered by the test suites.
+  checks:
+    name: Checks
+    runs-on: macos-15
     environment: action
 
     steps:
@@ -184,26 +55,6 @@ jobs:
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
-
-      - name: Install Linux system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            build-essential \
-            curl \
-            wget \
-            file \
-            pkg-config \
-            libgtk-3-dev \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libdbus-1-dev \
-            libkeyutils-dev \
-            patchelf \
-            rpm
 
       - name: Validate release version
         run: |
@@ -233,85 +84,25 @@ jobs:
             exit 1
           fi
 
-          echo "PEBBLE_VERSION=$version" >> "$GITHUB_ENV"
-
-      - name: Validate OAuth build config
-        env:
-          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
-          MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
-        run: |
-          set -euo pipefail
-          for name in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET MICROSOFT_CLIENT_ID; do
-            if [[ -z "${!name:-}" ]]; then
-              echo "$name is not configured in the 'action' GitHub environment." >&2
-              exit 1
-            fi
-          done
-          echo "OAuth client IDs and Google client secret are configured for this release build."
-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build Linux packages
-        env:
-          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
-          MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
-        run: pnpm build:linux
+      - name: Check Rust formatting
+        run: cargo fmt --check
 
-      - name: Collect release artifacts
-        run: |
-          set -euo pipefail
-          artifact_dir="release-artifacts"
-          mkdir -p "$artifact_dir"
+      - name: Check Rust lints
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
-          search_dirs=(
-            "target/release/bundle/appimage"
-            "src-tauri/target/release/bundle/appimage"
-            "target/release/bundle/deb"
-            "src-tauri/target/release/bundle/deb"
-            "target/release/bundle/rpm"
-            "src-tauri/target/release/bundle/rpm"
-          )
+      - name: Run Rust tests
+        run: cargo test --workspace --all-targets
 
-          found=()
-          for dir in "${search_dirs[@]}"; do
-            if [[ -d "$dir" ]]; then
-              while IFS= read -r -d '' package; do
-                found+=("$package")
-              done < <(find "$dir" -maxdepth 1 -type f \( -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \) -print0)
-            fi
-          done
-
-          if [[ "${#found[@]}" -eq 0 ]]; then
-            echo "No Linux package artifacts found in expected bundle directories." >&2
-            exit 1
-          fi
-
-          for package in "${found[@]}"; do
-            cp "$package" "$artifact_dir/$(basename "$package")"
-          done
-
-          for file in "$artifact_dir"/*; do
-            hash="$(sha256sum "$file" | awk '{print $1}')"
-            printf '%s  %s\n' "$hash" "$(basename "$file")" > "$file.sha256"
-          done
-
-          ls -lh "$artifact_dir"
-
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: pebble-linux-packages-${{ env.PEBBLE_VERSION }}
-          path: release-artifacts/*
-          if-no-files-found: error
+      - name: Run frontend tests
+        run: pnpm test
 
   macos:
     name: macOS Release (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
+    needs: checks
     environment: action
 
     strategy:
@@ -346,7 +137,6 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
           targets: ${{ matrix.target }}
 
       - name: Cache Rust build
@@ -456,7 +246,7 @@ jobs:
 
   publish:
     name: Publish Complete Release
-    needs: [windows, linux, macos]
+    needs: [checks, macos]
     runs-on: ubuntu-latest
     environment: action
 
@@ -478,19 +268,15 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          windows=(release-artifacts/*.exe)
-          appimages=(release-artifacts/*.AppImage)
-          debs=(release-artifacts/*.deb)
-          rpms=(release-artifacts/*.rpm)
           macos_arm=(release-artifacts/*-arm64.dmg)
           macos_x64=(release-artifacts/*-x64.dmg)
           checksums=(release-artifacts/*.sha256)
-          if (( ${#windows[@]} == 0 || ${#appimages[@]} == 0 || ${#debs[@]} == 0 || ${#rpms[@]} == 0 || ${#macos_arm[@]} == 0 || ${#macos_x64[@]} == 0 )); then
-            echo "Incomplete platform artifact set." >&2
+          if (( ${#macos_arm[@]} == 0 || ${#macos_x64[@]} == 0 )); then
+            echo "Incomplete macOS artifact set." >&2
             find release-artifacts -maxdepth 1 -type f -printf '%f\n' | sort
             exit 1
           fi
-          expected_checksums=$((${#windows[@]} + ${#appimages[@]} + ${#debs[@]} + ${#rpms[@]} + ${#macos_arm[@]} + ${#macos_x64[@]}))
+          expected_checksums=$((${#macos_arm[@]} + ${#macos_x64[@]}))
           if (( ${#checksums[@]} != expected_checksums )); then
             echo "Expected $expected_checksums checksums, found ${#checksums[@]}." >&2
             exit 1
