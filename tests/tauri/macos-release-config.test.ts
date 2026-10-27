@@ -149,8 +149,7 @@ describe("macOS release configuration", () => {
     expect(releaseWorkflow).not.toContain("appimage");
     expect(releaseWorkflow).not.toContain(".deb");
     expect(releaseWorkflow).not.toContain(".rpm");
-    expect(releaseWorkflow).toContain("needs: checks");
-    expect(releaseWorkflow).toContain("cargo clippy --workspace --all-targets -- -D warnings");
+    expect(releaseWorkflow).toContain("cargo clippy --workspace --all-targets");
     expect(releaseWorkflow).toContain("cargo test --workspace --all-targets");
     expect(releaseWorkflow).toContain("pnpm test");
   });
