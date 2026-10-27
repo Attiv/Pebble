@@ -368,6 +368,43 @@ impl Store {
         serialize_backup(&backup)
     }
 
+    /// Replace the board with the backup's cards, dropping any card whose
+    /// message is not in this database.
+    ///
+    /// `kanban_cards.message_id` is a foreign key into `messages`, but a
+    /// settings backup deliberately carries the board and never the mail
+    /// itself. A profile that has not synced yet — a fresh install, or the
+    /// first run on a new machine — has no row for the card to point at, so
+    /// inserting it fails the foreign key check and rolls back the *entire*
+    /// restore, accounts and rules included. Dropping the card is the cheaper
+    /// failure: a card whose mail is absent cannot be displayed anyway, and it
+    /// comes back as soon as the mailbox is synced and the board is rebuilt.
+    fn replace_kanban_cards_with_conn(
+        tx: &rusqlite::Transaction<'_>,
+        cards: &[pebble_core::KanbanCard],
+    ) -> Result<()> {
+        tx.execute("DELETE FROM kanban_cards", [])
+            .map_err(|e| PebbleError::Storage(e.to_string()))?;
+        for card in cards {
+            let message_exists: bool = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM messages WHERE id = ?1)",
+                    rusqlite::params![&card.message_id],
+                    |row| row.get(0),
+                )
+                .map_err(|e| PebbleError::Storage(e.to_string()))?;
+            if !message_exists {
+                tracing::warn!(
+                    message_id = %card.message_id,
+                    "Skipped a restored board card: its message is not in this database"
+                );
+                continue;
+            }
+            Self::upsert_kanban_card_with_conn(tx, card)?;
+        }
+        Ok(())
+    }
+
     /// Import settings from JSON bytes, upserting into the store.
     ///
     /// The entire import runs inside a single transaction so that a crash
@@ -453,12 +490,10 @@ impl Store {
                 ).map_err(|e| PebbleError::Storage(e.to_string()))?;
             }
 
-            // Replace kanban cards atomically so restored boards match the backup.
-            tx.execute("DELETE FROM kanban_cards", [])
-                .map_err(|e| PebbleError::Storage(e.to_string()))?;
-            for card in &backup.kanban_cards {
-                Self::upsert_kanban_card_with_conn(&tx, card)?;
-            }
+            // Replace kanban cards atomically so restored boards match the
+            // backup. Cards whose message is not in this database are skipped
+            // rather than aborting the whole restore.
+            Self::replace_kanban_cards_with_conn(&tx, &backup.kanban_cards)?;
 
             // Contacts were added in schema v2. A v1 restore must preserve
             // local contacts because the older file could not contain them.
@@ -564,11 +599,10 @@ impl Store {
                 ).map_err(|e| PebbleError::Storage(e.to_string()))?;
             }
 
-            tx.execute("DELETE FROM kanban_cards", [])
-                .map_err(|e| PebbleError::Storage(e.to_string()))?;
-            for card in &backup.kanban_cards {
-                Self::upsert_kanban_card_with_conn(&tx, card)?;
-            }
+            // Cards whose message is not in this database are skipped rather
+            // than aborting the whole restore; see
+            // `replace_kanban_cards_with_conn`.
+            Self::replace_kanban_cards_with_conn(&tx, &backup.kanban_cards)?;
 
             if backup.version >= 2 {
                 if let Some(contacts) = &backup.contacts {
@@ -1360,6 +1394,61 @@ mod tests {
         assert_eq!(cards.len(), 1);
         assert_eq!(cards[0].message_id, new_msg.id);
         assert_eq!(cards[0].column, KanbanColumn::Done);
+    }
+
+    /// A settings backup carries the board but never the mail, so restoring it
+    /// onto a profile that has not synced yet has no `messages` row for the
+    /// cards to point at. That used to fail the foreign key check and roll the
+    /// whole restore back; the card is now dropped and everything else lands.
+    #[test]
+    fn import_skips_board_cards_whose_message_is_missing() {
+        let store = Store::open_in_memory().unwrap();
+        let now = now_timestamp();
+        let backup = SettingsBackup {
+            version: 1,
+            exported_at: now,
+            accounts: vec![AccountBackup {
+                account_label: None,
+                id: "restored-account".to_string(),
+                email: "restored@example.com".to_string(),
+                display_name: String::new(),
+                color: None,
+                provider: ProviderType::Imap,
+            }],
+            rules: vec![],
+            kanban_cards: vec![
+                KanbanCard {
+                    message_id: "message-in-another-profile".to_string(),
+                    column: KanbanColumn::Todo,
+                    position: 0,
+                    created_at: now,
+                    updated_at: now,
+                },
+                KanbanCard {
+                    message_id: "message-that-was-deleted".to_string(),
+                    column: KanbanColumn::Waiting,
+                    position: 1,
+                    created_at: now,
+                    updated_at: now,
+                },
+            ],
+            kanban_context_notes: HashMap::new(),
+            contacts: None,
+            translate_config: None,
+            secret_summary: None,
+            encrypted_secrets: None,
+        };
+
+        store
+            .import_settings(&serde_json::to_vec(&backup).unwrap())
+            .expect("a card with no matching message must not fail the restore");
+
+        assert!(store.list_kanban_cards(None, None).unwrap().is_empty());
+        // The rest of the restore committed, which is the point of skipping
+        // the card instead of aborting the transaction.
+        let accounts = store.list_accounts().unwrap();
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].id, "restored-account");
     }
 
     #[test]
