@@ -1,3 +1,7 @@
+// See `pebble-core`: the redundant `#[must_use]` clippy reports here is
+// stamped by `async_trait`, not written by hand.
+#![allow(clippy::double_must_use)]
+
 pub(crate) mod backoff;
 pub mod gmail_sync;
 pub mod idle;
