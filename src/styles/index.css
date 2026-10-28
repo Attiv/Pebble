@@ -901,6 +901,15 @@ option {
   opacity: 0.75;
 }
 
+/* The line that explains how to stop receiving link-only invitations: an
+   aside, not one of the meeting's own facts. */
+.meeting-invite-card__hint {
+  margin-top: 3px;
+  padding-left: 19px;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
 .meeting-invite-card__action {
   flex: 0 0 auto;
   display: inline-flex;

@@ -574,8 +574,16 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
               }}
             >
               {/* A meeting invitation is a proposal rather than mail, so it
-                  sits above the body, inside the reading column. */}
-              {message.has_attachments && <MeetingInviteCard messageId={message.id} />}
+                  sits above the body, inside the reading column. The body goes
+                  with it: Outlook can send an invitation as a link with no
+                  attachment at all, and that shape is only visible in the text. */}
+              <MeetingInviteCard
+                messageId={message.id}
+                subject={message.subject}
+                hasAttachments={message.has_attachments}
+                bodyHtml={message.body_html_raw}
+                bodyText={message.body_text}
+              />
 
               {bilingualMode && bilingualLoading ? (
                 <div style={{ fontSize: "13px", color: "var(--color-text-secondary)" }}>{t("common.translating", "Translating...")}</div>

@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   CalendarDays,
   CalendarPlus,
   CalendarX,
   Clock,
+  ExternalLink,
   Loader,
   MapPin,
   Repeat,
@@ -12,10 +13,22 @@ import {
 } from "lucide-react";
 import { addMessageMeetingInviteToCalendar, getMessageMeetingInvite } from "@/lib/api";
 import type { MeetingInvite, MeetingInviteTime } from "@/lib/api";
+import { openMessageLink } from "@/lib/openMessageLink";
+import { findOutlookInviteLink } from "@/lib/outlookInviteLink";
 import { useToastStore } from "@/stores/toast.store";
 
 interface Props {
   messageId: string;
+  /** Subjects the link-only card; a mail with a real invitation brings its own. */
+  subject?: string;
+  /**
+   * Whether it is worth asking the backend for a calendar part. A message with
+   * no attachments cannot have one, and skipping the query keeps the common
+   * case free.
+   */
+  hasAttachments?: boolean;
+  bodyHtml?: string | null;
+  bodyText?: string | null;
 }
 
 interface Moment {
@@ -100,16 +113,31 @@ export function formatInviteRange(invite: MeetingInvite, locale: string): string
  * pays only the cost of one local query. Adding it hands the `.ics` to the
  * system calendar rather than keeping a copy here: the calendar owns the
  * meeting, and a second copy inside Pebble could only disagree with it.
+ *
+ * Invitations that arrive as an Outlook Web link have no calendar payload to
+ * read, so that case gets its own card — one button to the place the meeting
+ * actually lives, and the setting that stops it happening again.
  */
-export default function MeetingInviteCard({ messageId }: Props) {
+export default function MeetingInviteCard({
+  messageId,
+  subject = "",
+  hasAttachments = true,
+  bodyHtml,
+  bodyText,
+}: Props) {
   const { t, i18n } = useTranslation();
   const addToast = useToastStore((state) => state.addToast);
   const [invite, setInvite] = useState<MeetingInvite | null>(null);
   const [adding, setAdding] = useState(false);
+  const linkOnlyUrl = useMemo(
+    () => findOutlookInviteLink(bodyHtml, bodyText),
+    [bodyHtml, bodyText],
+  );
 
   useEffect(() => {
     let cancelled = false;
     setInvite(null);
+    if (!hasAttachments) return;
 
     void (async () => {
       try {
@@ -125,9 +153,61 @@ export default function MeetingInviteCard({ messageId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [messageId]);
+  }, [messageId, hasAttachments]);
 
-  if (!invite) return null;
+  if (!invite && !linkOnlyUrl) return null;
+
+  // An invitation with no payload: the meeting lives in Outlook and all this
+  // message carries is the way back to it.
+  if (!invite) {
+    return (
+      <section
+        className="meeting-invite-card"
+        data-link-only="true"
+        data-testid="meeting-invite-card"
+        aria-label={t("calendar.invite", "Meeting invitation")}
+      >
+        <div className="meeting-invite-card__icon" aria-hidden="true">
+          <CalendarDays size={18} />
+        </div>
+
+        <div className="meeting-invite-card__body">
+          <div className="meeting-invite-card__label">
+            {t("calendar.invite", "Meeting invitation")}
+          </div>
+          <div className="meeting-invite-card__title">
+            {subject || t("calendar.untitled", "Untitled meeting")}
+          </div>
+          <div className="meeting-invite-card__meta">
+            <Clock size={13} aria-hidden="true" />
+            <span>
+              {t(
+                "calendar.linkOnly",
+                "This invitation arrived as an Outlook link, so its time and agenda are not in this mail.",
+              )}
+            </span>
+          </div>
+          <div className="meeting-invite-card__meta meeting-invite-card__hint">
+            <span>
+              {t(
+                "calendar.linkOnlyHint",
+                "In Outlook, turn on “Send meeting invitations in iCalendar format” to receive invitations Pebble can add for you.",
+              )}
+            </span>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          className="meeting-invite-card__action"
+          onClick={() => void openMessageLink(linkOnlyUrl!)}
+        >
+          <ExternalLink size={14} />
+          <span>{t("calendar.openInOutlook", "Open in Outlook")}</span>
+        </button>
+      </section>
+    );
+  }
 
   const when = formatInviteRange(invite, i18n.language);
   const organizer = invite.organizer_name

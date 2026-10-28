@@ -410,7 +410,10 @@
     "repeats": "属于重复会议",
     "add": "加入日历",
     "opened": "已在日历中打开",
-    "openFailed": "无法打开日历"
+    "openFailed": "无法打开日历",
+    "linkOnly": "这封邀请以 Outlook 链接的形式送达，时间和议程都不在邮件里。",
+    "linkOnlyHint": "在 Outlook 里打开「以 iCalendar 格式发送会议邀请」，以后 Pebble 就能直接帮你加入日历。",
+    "openInOutlook": "在 Outlook 中打开"
   },
   "search": {
     "title": "搜索",

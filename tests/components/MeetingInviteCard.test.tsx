@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   getMessageMeetingInvite: vi.fn(),
   addMessageMeetingInviteToCalendar: vi.fn(),
   addToast: vi.fn(),
+  openMessageLink: vi.fn(),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -17,6 +18,10 @@ vi.mock("react-i18next", () => ({
 vi.mock("@/lib/api", () => ({
   getMessageMeetingInvite: mocks.getMessageMeetingInvite,
   addMessageMeetingInviteToCalendar: mocks.addMessageMeetingInviteToCalendar,
+}));
+
+vi.mock("@/lib/openMessageLink", () => ({
+  openMessageLink: mocks.openMessageLink,
 }));
 
 vi.mock("@/stores/toast.store", () => ({
@@ -124,6 +129,44 @@ describe("MeetingInviteCard", () => {
         type: "error",
       }),
     );
+  });
+
+  it("explains an invitation that arrived as a link instead of a file", async () => {
+    // Outlook can invite with an Outlook Web link; such a message carries no
+    // calendar payload, so there is no button that could add anything.
+    mocks.openMessageLink.mockResolvedValueOnce(undefined);
+    const body =
+      'Microsoft Outlook Web Access: <a href="https://outlook.office365.com/owa/x.com/?itemid=AAMk&amp;exvsurl=1&amp;path=/calendar/item">open</a>';
+
+    render(
+      <MeetingInviteCard
+        messageId="message-1"
+        subject="Weekly Progress Meeting"
+        hasAttachments={false}
+        bodyHtml={body}
+      />,
+    );
+
+    expect(await screen.findByText("Weekly Progress Meeting")).toBeTruthy();
+    expect(screen.getByText(/arrived as an Outlook link/)).toBeTruthy();
+    expect(screen.getByText(/iCalendar format/)).toBeTruthy();
+    // Nothing pretended to be a calendar write.
+    expect(screen.queryByText("Add to Calendar")).toBeNull();
+    expect(mocks.getMessageMeetingInvite).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText("Open in Outlook"));
+    expect(mocks.openMessageLink).toHaveBeenCalledWith(
+      "https://outlook.office365.com/owa/x.com/?itemid=AAMk&exvsurl=1&path=/calendar/item",
+    );
+  });
+
+  it("stays out of the way when a mail is neither an invitation nor a link", async () => {
+    const { container } = render(
+      <MeetingInviteCard messageId="message-1" hasAttachments={false} bodyText="Lunch?" />,
+    );
+
+    expect(mocks.getMessageMeetingInvite).not.toHaveBeenCalled();
+    expect(container.innerHTML).toBe("");
   });
 
   it("says so when the meeting repeats rather than pretending it is a one-off", async () => {

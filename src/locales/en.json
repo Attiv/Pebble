@@ -410,7 +410,10 @@
     "repeats": "Part of a repeating series",
     "add": "Add to calendar",
     "opened": "Opened in your calendar",
-    "openFailed": "Could not open your calendar"
+    "openFailed": "Could not open your calendar",
+    "linkOnly": "This invitation arrived as an Outlook link, so its time and agenda are not in this mail.",
+    "linkOnlyHint": "In Outlook, turn on “Send meeting invitations in iCalendar format” to receive invitations Pebble can add for you.",
+    "openInOutlook": "Open in Outlook"
   },
   "search": {
     "title": "Search",
