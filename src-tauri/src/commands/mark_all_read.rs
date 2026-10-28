@@ -16,7 +16,7 @@ use pebble_core::{PebbleError, ProviderType};
 use pebble_store::messages::UnreadMessageRef;
 use std::collections::HashSet;
 use tauri::State;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Messages whose read flag may be committed locally: everything the provider
 /// acknowledged, plus everything queued because the provider was unreachable.
@@ -42,8 +42,52 @@ pub async fn mark_account_all_read(
     state: State<'_, AppState>,
     account_id: String,
 ) -> std::result::Result<u32, PebbleError> {
+    mark_account_read_inner(&app, &state, &account_id).await
+}
+
+/// The same action for every mailbox at once — the one click that clears the
+/// app icon badge completely.
+///
+/// Accounts are handled one after another rather than concurrently: a person
+/// with several busy mailboxes would otherwise open a connection to each of
+/// them at the same instant, and one slow provider would have to be waited on
+/// anyway. A mailbox that fails does not abandon the rest, so the number
+/// returned is what was actually cleared.
+#[tauri::command]
+pub async fn mark_all_accounts_read(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> std::result::Result<u32, PebbleError> {
     let store = state.store.clone();
-    let lookup_id = account_id.clone();
+    let accounts = tokio::task::spawn_blocking(move || store.list_accounts())
+        .await
+        .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))??;
+
+    let mut cleared = 0u32;
+    for account in &accounts {
+        match mark_account_read_inner(&app, &state, &account.id).await {
+            Ok(count) => cleared += count,
+            Err(error) => warn!(
+                account = %account.id,
+                "Mark all as read failed for one mailbox: {error}"
+            ),
+        }
+    }
+
+    info!(
+        "Marked all as read across {} accounts: {cleared} messages cleared",
+        accounts.len()
+    );
+    Ok(cleared)
+}
+
+async fn mark_account_read_inner(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    account_id: &str,
+) -> std::result::Result<u32, PebbleError> {
+    let store = state.store.clone();
+    let lookup_id = account_id.to_string();
     let (refs, provider_type) = tokio::task::spawn_blocking(
         move || -> std::result::Result<(Vec<UnreadMessageRef>, Option<ProviderType>), PebbleError> {
             let refs = store.list_unread_message_refs(&lookup_id)?;
@@ -71,7 +115,7 @@ pub async fn mark_account_all_read(
         })
         .collect();
 
-    let sync = sync_read_flag_remote(&state, &account_id, &provider_type, &targets, true).await?;
+    let sync = sync_read_flag_remote(state, account_id, &provider_type, &targets, true).await?;
     let ids_to_update = local_commit_ids(&refs, &sync);
 
     if !ids_to_update.is_empty() {
@@ -90,7 +134,7 @@ pub async fn mark_account_all_read(
         "Marked all as read for account {account_id}: {cleared}/{} unread messages cleared",
         refs.len()
     );
-    badge::request_refresh(&app);
+    badge::request_refresh(app);
     Ok(cleared)
 }
 

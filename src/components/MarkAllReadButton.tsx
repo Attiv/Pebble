@@ -2,21 +2,25 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Loader, MailOpen } from "lucide-react";
-import { markAccountAllRead } from "@/lib/api";
+import { markAccountAllRead, markAllAccountsRead } from "@/lib/api";
 import { invalidateUnreadViews } from "@/hooks/queries";
 import { useToastStore } from "@/stores/toast.store";
 
 interface Props {
-  accountId: string;
+  /**
+   * Omit to act on every mailbox at once, which is the one click that empties
+   * the app icon badge completely.
+   */
+  accountId?: string;
   /** Shown in tooltips and the success toast, e.g. "Work (me@example.com)". */
-  accountLabel: string;
-  /** Unread mail in this mailbox; 0 disables the action. */
+  accountLabel?: string;
+  /** Unread mail in scope; 0 disables the action. */
   unread: number;
   /**
-   * `icon` for toolbars and the sidebar, `labelled` for settings rows where
-   * there is room to spell the action out.
+   * `icon` for the sidebar, `labelled` for settings rows where there is room to
+   * spell the action out, `toolbar` to sit among the inbox's 40px buttons.
    */
-  variant?: "icon" | "labelled";
+  variant?: "icon" | "labelled" | "toolbar";
   style?: React.CSSProperties;
 }
 
@@ -40,23 +44,35 @@ export default function MarkAllReadButton({
   const addToast = useToastStore((s) => s.addToast);
   const [marking, setMarking] = useState(false);
 
-  const label = t("messageActions.markAllRead", "Mark all as read in {{account}}", {
-    account: accountLabel,
-  });
+  const isGlobal = !accountId;
+  const isToolbar = variant === "toolbar";
+  const label = isGlobal
+    ? t("messageActions.markAllReadEverywhere", "Mark all as read in every mailbox")
+    : t("messageActions.markAllRead", "Mark all as read in {{account}}", {
+        account: accountLabel,
+      });
   const disabled = marking || unread === 0;
 
   async function handleClick() {
     if (disabled) return;
     setMarking(true);
     try {
-      const count = await markAccountAllRead(accountId);
+      const count = isGlobal
+        ? await markAllAccountsRead()
+        : await markAccountAllRead(accountId!);
       invalidateUnreadViews(queryClient);
       addToast({
-        message: t(
-          "messageActions.markAllReadSuccess",
-          "Marked {{count}} messages as read in {{account}}",
-          { count, account: accountLabel },
-        ),
+        message: isGlobal
+          ? t(
+              "messageActions.markAllReadEverywhereSuccess",
+              "Marked {{count}} messages as read in every mailbox",
+              { count },
+            )
+          : t(
+              "messageActions.markAllReadSuccess",
+              "Marked {{count}} messages as read in {{account}}",
+              { count, account: accountLabel },
+            ),
         type: "success",
       });
     } catch {
@@ -94,19 +110,20 @@ export default function MarkAllReadButton({
       disabled={disabled}
       title={label}
       aria-label={label}
-      data-testid={`mark-all-read-${accountId}`}
-      style={baseStyle}
+      data-testid={`mark-all-read-${accountId ?? "all"}`}
+      className={isToolbar ? "inbox-toolbar-button" : undefined}
+      style={isToolbar ? { opacity: disabled ? 0.45 : 1, ...style } : baseStyle}
       onMouseEnter={(e) => {
-        if (!disabled) e.currentTarget.style.color = "var(--color-accent)";
+        if (!disabled && !isToolbar) e.currentTarget.style.color = "var(--color-accent)";
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.color = "var(--color-text-secondary)";
+        if (!isToolbar) e.currentTarget.style.color = "var(--color-text-secondary)";
       }}
     >
       {marking ? (
-        <Loader size={14} className="spinner" />
+        <Loader size={isToolbar ? 16 : 14} className="spinner" />
       ) : (
-        <MailOpen size={14} />
+        <MailOpen size={isToolbar ? 16 : 14} />
       )}
       {variant === "labelled" && (
         <span>

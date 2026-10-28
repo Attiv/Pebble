@@ -61,6 +61,7 @@ vi.mock("../../../src/stores/mail.store", () => ({
 }));
 
 vi.mock("../../../src/hooks/queries", () => ({
+  useAccountUnreadCounts: () => ({}),
   useAccountsQuery: () => ({
     data: [
       {

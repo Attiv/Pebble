@@ -45,6 +45,9 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
         isRead: true,
         accountId: cachedMessage.account_id,
         previousIsRead: false,
+        // Opening is the user's own action: clear the dot and the badge now and
+        // let the provider catch up, instead of waiting for an IMAP round trip.
+        optimistic: true,
       });
     }
 
@@ -69,6 +72,7 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
             isRead: true,
             accountId: msg.account_id,
             previousIsRead: false,
+            optimistic: true,
           });
         }
       } catch (err) {

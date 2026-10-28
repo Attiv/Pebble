@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag to build, for example v0.1.7
+        description: Release tag to build, for example v0.1.8
         required: true
-        default: v0.1.7
+        default: v0.1.8
 
 env:
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
@@ -193,6 +193,16 @@ jobs:
               echo "$name is not configured in the 'action' GitHub environment." >&2
               exit 1
             fi
+            # A placeholder is worse than a missing value: the build succeeds,
+            # the bundle ships, and the failure only shows up at sign-in time on
+            # the user's machine (invalid_client / AADSTS700016). These are the
+            # values an unconfigured fork inherits.
+            case "${!name}" in
+              unused-in-this-fork*|YOUR_*|*_PLACEHOLDER|00000000-0000-0000-0000-000000000000)
+                echo "$name still holds the placeholder value; set the real one in the 'action' environment." >&2
+                exit 1
+                ;;
+            esac
           done
           echo "OAuth client IDs and Google client secret are configured for this release build."
 

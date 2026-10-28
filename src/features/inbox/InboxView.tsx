@@ -1,8 +1,9 @@
 import { useMailStore } from "@/stores/mail.store";
-import { useAccountsQuery, useMessagesQuery, useThreadsQuery, useFoldersForAccountsQuery, patchMessagesCache } from "@/hooks/queries";
+import { useAccountsQuery, useMessagesQuery, useThreadsQuery, useFoldersForAccountsQuery, patchMessagesCache, useAccountUnreadCounts } from "@/hooks/queries";
 import { useUIStore } from "@/stores/ui.store";
 import { useToastStore } from "@/stores/toast.store";
 import MessageList from "@/components/MessageList";
+import MarkAllReadButton from "@/components/MarkAllReadButton";
 import MessageDetail from "@/components/MessageDetail";
 import ThreadView from "./ThreadView";
 import ThreadItem from "@/components/ThreadItem";
@@ -47,6 +48,13 @@ export default function InboxView() {
   const addToast = useToastStore((s) => s.addToast);
   const [showTrashConfirm, setShowTrashConfirm] = useState(false);
   const [syncingMailbox, setSyncingMailbox] = useState(false);
+  // The scope of the toolbar's "mark everything read" button is every mailbox,
+  // which is also what the app icon badge counts.
+  const unreadCounts = useAccountUnreadCounts();
+  const totalUnread = useMemo(
+    () => Object.values(unreadCounts).reduce((sum, count) => sum + count, 0),
+    [unreadCounts],
+  );
 
   // Shown when the selected mailbox has no folders locally, which means its first
   // sync either never ran or did not finish.
@@ -212,6 +220,9 @@ export default function InboxView() {
               />
             )}
           </>
+        )}
+        {!isTrashFolder && (
+          <MarkAllReadButton unread={totalUnread} variant="toolbar" />
         )}
         {!threadView && (
           <button

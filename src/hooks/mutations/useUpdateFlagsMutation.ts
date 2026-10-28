@@ -14,6 +14,8 @@ interface UpdateFlagsParams {
   isStarred?: boolean;
   accountId?: string;
   previousIsRead?: boolean;
+  /** See `updateMessageFlags`: write locally first, tell the provider after. */
+  optimistic?: boolean;
 }
 
 interface MutationContext {
@@ -27,7 +29,16 @@ export function useUpdateFlagsMutation() {
 
   return useMutation({
     mutationFn: (params: UpdateFlagsParams) =>
-      updateMessageFlags(params.messageId, params.isRead, params.isStarred),
+      // Only pass the fourth argument when it is actually set, so the call keeps
+      // its three-argument shape everywhere else.
+      params.optimistic === undefined
+        ? updateMessageFlags(params.messageId, params.isRead, params.isStarred)
+        : updateMessageFlags(
+            params.messageId,
+            params.isRead,
+            params.isStarred,
+            params.optimistic,
+          ),
     onMutate: async (params): Promise<MutationContext> => {
       await queryClient.cancelQueries({ queryKey: ["messages"] });
       await queryClient.cancelQueries({

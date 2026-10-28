@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   },
   invalidateUnreadViews: vi.fn(),
   markAccountAllRead: vi.fn(),
+  markAllAccountsRead: vi.fn(),
   addToast: vi.fn(),
 }));
 
@@ -29,6 +30,7 @@ vi.mock("@tanstack/react-query", () => ({
 
 vi.mock("@/lib/api", () => ({
   markAccountAllRead: mocks.markAccountAllRead,
+  markAllAccountsRead: mocks.markAllAccountsRead,
 }));
 
 vi.mock("@/hooks/queries", () => ({
@@ -126,6 +128,30 @@ describe("MarkAllReadButton", () => {
 
     await waitFor(() => expect(screen.getByText("Mark all as read")).toBeTruthy());
     expect(button.getAttribute("disabled")).toBeNull();
+  });
+
+  it("clears every mailbox at once when no account is given", async () => {
+    mocks.markAllAccountsRead.mockResolvedValueOnce(9);
+    render(<MarkAllReadButton unread={9} variant="toolbar" />);
+
+    const button = screen.getByTestId("mark-all-read-all");
+    fireEvent.click(button);
+
+    await waitFor(() => expect(mocks.markAllAccountsRead).toHaveBeenCalledOnce());
+    expect(mocks.markAccountAllRead).not.toHaveBeenCalled();
+    expect(mocks.invalidateUnreadViews).toHaveBeenCalledWith(mocks.queryClient);
+    expect(mocks.addToast).toHaveBeenCalledWith({
+      message: "Marked 9 messages as read in every mailbox",
+      type: "success",
+    });
+  });
+
+  it("sits among the inbox toolbar buttons instead of carrying its own chrome", () => {
+    render(<MarkAllReadButton unread={2} variant="toolbar" />);
+
+    const button = screen.getByTestId("mark-all-read-all");
+    expect(button.className).toContain("inbox-toolbar-button");
+    expect(button.getAttribute("aria-label")).toBe("Mark all as read in every mailbox");
   });
 
   it("renders no visible label in the icon variant", () => {

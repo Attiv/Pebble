@@ -334,8 +334,15 @@ export async function updateMessageFlags(
   messageId: string,
   isRead?: boolean,
   isStarred?: boolean,
+  /**
+   * Write the flag locally first and let the provider catch up in the
+   * background. Used when the change is the user's action — opening a message
+   * marks it read — so the unread dot and the app badge clear at once instead
+   * of after an IMAP round trip.
+   */
+  optimistic = false,
 ): Promise<void> {
-  return invoke<void>("update_message_flags", { messageId, isRead, isStarred });
+  return invoke<void>("update_message_flags", { messageId, isRead, isStarred, optimistic });
 }
 
 // Rapid-toggle guard: archive_message is toggle-based (archive ⇄ unarchive),
@@ -916,6 +923,15 @@ export async function getAccountUnreadCounts(): Promise<Record<string, number>> 
  */
 export async function markAccountAllRead(accountId: string): Promise<number> {
   return invoke<number>("mark_account_all_read", { accountId });
+}
+
+/**
+ * The same action for every mailbox at once. Resolves with the number of
+ * messages cleared across all accounts, which is also the number that leaves
+ * the app icon badge.
+ */
+export async function markAllAccountsRead(): Promise<number> {
+  return invoke<number>("mark_all_accounts_read");
 }
 
 // ─── Autostart API ───────────────────────────────────────────────────────────

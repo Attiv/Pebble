@@ -57,6 +57,7 @@ vi.mock("../../../src/stores/toast.store", () => ({
 }));
 
 vi.mock("../../../src/hooks/queries", () => ({
+  useAccountUnreadCounts: () => ({}),
   useAccountsQuery: () => ({ data: mocks.accounts }),
   useFoldersQuery: () => ({
     data: mocks.folders.slice(0, 1),

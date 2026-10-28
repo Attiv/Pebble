@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-10-28
+
+### Added
+
+- The inbox toolbar can now mark every unread message in every mailbox as read in one click, which is the single action that empties the app icon badge. A per-mailbox version already existed in the sidebar and in Settings, but it asked the reader to repeat the click once per account and left the badge showing whatever the other mailboxes still held. The new button takes exactly the scope the badge itself counts — unread, not deleted, and not filed exclusively under drafts, trash or spam — so the number it clears is the number that was on the icon. Accounts are handled one at a time rather than at once, because several busy mailboxes should not make the providers see a burst of simultaneous connections, and one mailbox that fails is reported instead of aborting the rest: the toast carries what was actually cleared.
+
+### Fixed
+
+- Opening a message now clears its unread marker and the app icon badge immediately. The local flag used to be committed only after the provider acknowledged the write, so on IMAP that meant waiting for a fresh connection, a `SELECT` and a `STORE` before the row stopped looking unread — seconds on a slow mailbox, with the badge trailing behind because it is recounted from the database rather than pushed. The change is now written locally first and pushed to the provider in the background, where a failure is queued for retry instead of losing the write. Changes that are a preference rather than an action — starring, toggling a message back to unread — keep the previous order, because a flag that silently disagrees with the server is worse than one that takes a moment.
+- Google and Outlook one-click sign-in works in the published builds again. The release workflow has always read its client IDs from the `action` environment, where this fork's placeholders were stored (`unused-in-this-fork.apps.googleusercontent.com` and an all-zero GUID), so a downloaded build could not finish a Google sign-in at all and its refresh tokens were rejected with `invalid_client`; the real credentials existed only in the developer's local `.env`. The environment now holds the real values, and a release fails before it builds anything if one of those placeholders is supplied again, because the previous validation only checked that the variables were non-empty. Password-based IMAP, iCloud and the manual XOAUTH2 setup were never affected.
+
 ## [0.1.7] - 2026-10-27
 
 ### Added
@@ -401,7 +412,8 @@ This release includes:
 - Windows installers are not code-signed yet, so Windows SmartScreen may show a warning.
 - Outlook support is still experimental and depends on Microsoft Graph permissions configured by the user.
 
-[Unreleased]: https://github.com/QingJ01/Pebble/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/QingJ01/Pebble/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/QingJ01/Pebble/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/QingJ01/Pebble/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/QingJ01/Pebble/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/QingJ01/Pebble/compare/v0.1.4...v0.1.5

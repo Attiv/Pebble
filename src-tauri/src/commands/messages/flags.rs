@@ -4,7 +4,7 @@ use pebble_core::traits::LabelProvider;
 use pebble_core::{Message, PebbleError, ProviderType};
 use pebble_mail::{ImapConfig, ImapProvider};
 use serde_json::json;
-use tauri::State;
+use tauri::{Manager, State};
 
 use super::{
     connect_gmail, connect_outlook, load_imap_config, queue_pending_remote_op,
@@ -35,6 +35,12 @@ pub async fn update_message_flags(
     message_id: String,
     is_read: Option<bool>,
     is_starred: Option<bool>,
+    // Commit the new flags locally before the provider acknowledges them. Set
+    // when the change *is* the user's action rather than a preference they are
+    // configuring: opening a message marks it read, and waiting for an IMAP
+    // `SELECT` + `STORE` round trip during that transition is the difference
+    // between the unread dot clearing now and clearing seconds later.
+    optimistic: Option<bool>,
 ) -> std::result::Result<(), PebbleError> {
     // 1. Resolve DB state off the Tokio runtime before attempting remote writeback.
     let store = state.store.clone();
@@ -87,8 +93,55 @@ pub async fn update_message_flags(
         .await
         .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))??;
 
-    // 2. Provider-specific remote writeback. Local flags are committed only
+    // 2. Optimistic path. The local flag is the user's action, so it is written
+    //    now and the provider is told afterwards; the badge is refreshed from
+    //    the database, which is why it clears immediately too.
+    if optimistic.unwrap_or(false) {
+        commit_local_flags(&state, &message_id, is_read, is_starred).await?;
+        if is_read.is_some() {
+            badge::request_refresh(&app);
+        }
+
+        let app = app.clone();
+        let message_id = message_id.clone();
+        tauri::async_runtime::spawn(async move {
+            let state = app.state::<AppState>();
+            if let Err(error) =
+                apply_remote_writeback(&state, writeback_info, is_read, is_starred).await
+            {
+                tracing::warn!("Deferred flag writeback failed for {message_id}: {error}");
+            }
+        });
+        return Ok(());
+    }
+
+    // 3. Provider-specific remote writeback. Local flags are committed only
     //    after remote ack or when there is no remote target.
+    let outcome = apply_remote_writeback(&state, writeback_info, is_read, is_starred).await?;
+
+    if !remote_mutation_allows_local_commit(outcome) {
+        return Err(PebbleError::Network(
+            "Remote flag update was not applied".to_string(),
+        ));
+    }
+
+    commit_local_flags(&state, &message_id, is_read, is_starred).await?;
+
+    if is_read.is_some() {
+        badge::request_refresh(&app);
+    }
+
+    Ok(())
+}
+
+/// Push one flag change to the account's provider, queueing a retry when it
+/// cannot be delivered.
+async fn apply_remote_writeback(
+    state: &AppState,
+    writeback_info: WritebackInfo,
+    is_read: Option<bool>,
+    is_starred: Option<bool>,
+) -> std::result::Result<RemoteMutationOutcome, PebbleError> {
     let outcome = match writeback_info {
         WritebackInfo::Gmail { msg } => {
             let mut add = Vec::new();
@@ -110,13 +163,13 @@ pub async fn update_message_flags(
 
             if !add.is_empty() || !remove.is_empty() {
                 let remote_id = msg.remote_id.clone();
-                match connect_gmail(&state, &msg.account_id).await {
+                match connect_gmail(state, &msg.account_id).await {
                     Ok(provider) => match provider.modify_labels(&remote_id, &add, &remove).await {
                         Ok(()) => RemoteMutationOutcome::Applied,
                         Err(e) => {
                             let error = e.to_string();
                             let outcome = queue_pending_remote_op(
-                                &state,
+                                state,
                                 &msg,
                                 "update_flags",
                                 json!({
@@ -136,7 +189,7 @@ pub async fn update_message_flags(
                     Err(e) => {
                         let error = e.to_string();
                         let outcome = queue_pending_remote_op_for_local_commit(
-                            &state,
+                            state,
                             &msg,
                             "update_flags",
                             json!({
@@ -159,13 +212,13 @@ pub async fn update_message_flags(
         }
         WritebackInfo::Outlook { msg } => {
             let remote_id = msg.remote_id.clone();
-            match connect_outlook(&state, &msg.account_id).await {
+            match connect_outlook(state, &msg.account_id).await {
                 Ok(provider) => {
                     if let Some(read) = is_read {
                         if let Err(e) = provider.update_read_status(&remote_id, read).await {
                             let error = e.to_string();
                             let outcome = queue_pending_remote_op(
-                                &state,
+                                state,
                                 &msg,
                                 "update_flags",
                                 json!({
@@ -186,7 +239,7 @@ pub async fn update_message_flags(
                         if let Err(e) = provider.update_flag_status(&remote_id, starred).await {
                             let error = e.to_string();
                             let outcome = queue_pending_remote_op(
-                                &state,
+                                state,
                                 &msg,
                                 "update_flags",
                                 json!({
@@ -208,7 +261,7 @@ pub async fn update_message_flags(
                 Err(e) => {
                     let error = e.to_string();
                     let outcome = queue_pending_remote_op_for_local_commit(
-                        &state,
+                        state,
                         &msg,
                         "update_flags",
                         json!({
@@ -242,7 +295,7 @@ pub async fn update_message_flags(
                             Err(e) => {
                                 let error = e.to_string();
                                 let outcome = queue_pending_remote_op(
-                                    &state,
+                                    state,
                                     &msg,
                                     "update_flags",
                                     json!({
@@ -262,7 +315,7 @@ pub async fn update_message_flags(
                     Err(e) => {
                         let error = e.to_string();
                         let outcome = queue_pending_remote_op_for_local_commit(
-                            &state,
+                            state,
                             &msg,
                             "update_flags",
                             json!({
@@ -281,7 +334,7 @@ pub async fn update_message_flags(
             } else {
                 let error = format!("Invalid IMAP UID: {}", msg.remote_id);
                 let outcome = queue_pending_remote_op(
-                    &state,
+                    state,
                     &msg,
                     "update_flags",
                     json!({
@@ -300,22 +353,22 @@ pub async fn update_message_flags(
         WritebackInfo::None => RemoteMutationOutcome::LocalOnly,
     };
 
-    if !remote_mutation_allows_local_commit(outcome) {
-        return Err(PebbleError::Network(
-            "Remote flag update was not applied".to_string(),
-        ));
-    }
+    Ok(outcome)
+}
 
+/// Write the flags into the local database.
+async fn commit_local_flags(
+    state: &AppState,
+    message_id: &str,
+    is_read: Option<bool>,
+    is_starred: Option<bool>,
+) -> std::result::Result<(), PebbleError> {
     let store = state.store.clone();
+    let message_id = message_id.to_string();
     tokio::task::spawn_blocking(move || {
         store.update_message_flags(&message_id, is_read, is_starred)
     })
     .await
     .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))??;
-
-    if is_read.is_some() {
-        badge::request_refresh(&app);
-    }
-
     Ok(())
 }
