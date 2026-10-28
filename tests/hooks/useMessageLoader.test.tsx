@@ -1,4 +1,6 @@
 import { renderHook, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message, RenderedHtml } from "../../src/lib/api";
 import { useMessageLoader } from "../../src/hooks/useMessageLoader";
@@ -53,6 +55,20 @@ function makeRendered(html = "<p>Body</p>"): RenderedHtml {
   };
 }
 
+/**
+ * The hook reads the query cache to avoid reloading a message it already has,
+ * so it needs a client even though nothing in these cases is cached.
+ */
+function createWrapper() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+
+  return ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+}
+
 describe("useMessageLoader", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -61,7 +77,7 @@ describe("useMessageLoader", () => {
   it("does not request a second HTML render after the initial message load", async () => {
     vi.mocked(getMessageWithHtml).mockResolvedValue([makeMessage(), makeRendered()]);
 
-    const { result } = renderHook(() => useMessageLoader("message-1", "Strict"));
+    const { result } = renderHook(() => useMessageLoader("message-1", "Strict"), { wrapper: createWrapper() });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -76,7 +92,7 @@ describe("useMessageLoader", () => {
 
     const { rerender } = renderHook(
       ({ privacyMode }) => useMessageLoader("message-1", privacyMode),
-      { initialProps: { privacyMode: "Strict" as const } },
+      { initialProps: { privacyMode: "Strict" as const }, wrapper: createWrapper() },
     );
 
     await waitFor(() => expect(getMessageWithHtml).toHaveBeenCalledOnce());
@@ -91,7 +107,7 @@ describe("useMessageLoader", () => {
   it("exposes message load failures instead of collapsing them into a missing message", async () => {
     vi.mocked(getMessageWithHtml).mockRejectedValue(new Error("IPC failed"));
 
-    const { result } = renderHook(() => useMessageLoader("message-1", "Strict"));
+    const { result } = renderHook(() => useMessageLoader("message-1", "Strict"), { wrapper: createWrapper() });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -105,7 +121,7 @@ describe("useMessageLoader", () => {
 
     const { result, rerender } = renderHook(
       ({ privacyMode }) => useMessageLoader("message-1", privacyMode),
-      { initialProps: { privacyMode: "Strict" as const } },
+      { initialProps: { privacyMode: "Strict" as const }, wrapper: createWrapper() },
     );
 
     await waitFor(() => expect(result.current.message?.id).toBe("message-1"));
