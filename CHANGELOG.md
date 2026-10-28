@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-10-28
+
 ### Changed
 
 - Trusting a sender now covers every mailbox, instead of only the one that was open at the time. The trust table was keyed on `(account_id, email)`, so an address had to be trusted once per mailbox — you trusted a sender while reading one account and were asked again the next time that sender wrote to another, which read as the trust never having taken. What a tracking pixel costs does not depend on which of your addresses received it, so the decision is now made about the sender: one row per address, read without an account filter, and removing it from Settings removes it everywhere. Existing rows are collapsed by a migration, keeping the stronger of two levels for the same address; five redundant rows on this machine alone. The banner's tooltips and the Settings list now say "in every mailbox", because the old wording promised exactly what it did not do.
@@ -421,10 +423,11 @@ This release includes:
 - Windows installers are not code-signed yet, so Windows SmartScreen may show a warning.
 - Outlook support is still experimental and depends on Microsoft Graph permissions configured by the user.
 
-[Unreleased]: https://github.com/QingJ01/Pebble/compare/v0.1.8...HEAD
-[0.1.8]: https://github.com/QingJ01/Pebble/compare/v0.1.7...v0.1.8
-[0.1.7]: https://github.com/QingJ01/Pebble/compare/v0.1.6...v0.1.7
-[0.1.6]: https://github.com/QingJ01/Pebble/compare/v0.1.5...v0.1.6
+[Unreleased]: https://github.com/Attiv/Pebble/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/Attiv/Pebble/compare/v0.1.8...v0.1.9
+[0.1.8]: https://github.com/Attiv/Pebble/compare/v0.1.7...v0.1.8
+[0.1.7]: https://github.com/Attiv/Pebble/compare/v0.1.6...v0.1.7
+[0.1.6]: https://github.com/Attiv/Pebble/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/QingJ01/Pebble/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/QingJ01/Pebble/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/QingJ01/Pebble/compare/v0.1.2...v0.1.3

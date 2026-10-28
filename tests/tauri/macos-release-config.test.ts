@@ -14,11 +14,15 @@ describe("macOS release configuration", () => {
     const releaseWorkflow = readFileSync(resolve(process.cwd(), ".github", "workflows", "release.yml"), "utf8");
     const cargoVersion = cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
 
-    expect(packageJson.version).toBe("0.1.8");
+    expect(packageJson.version).toBe("0.1.9");
     expect(tauriConfig.version).toBe(packageJson.version);
     expect(cargoVersion).toBe(packageJson.version);
     expect(changelog).toContain(`## [${packageJson.version}] - `);
-    expect(changelog).toContain(`[Unreleased]: https://github.com/QingJ01/Pebble/compare/v${packageJson.version}...HEAD`);
+    // The host is deliberately not pinned: the tags live in whichever fork cuts
+    // the release, and this assertion is about the version, not about the owner.
+    expect(changelog).toMatch(
+      new RegExp(`\\[Unreleased\\]: https://github\\.com/[^/]+/Pebble/compare/v${packageJson.version}\\.\\.\\.HEAD`),
+    );
     expect(releaseWorkflow).toContain(`default: v${packageJson.version}`);
   });
 
