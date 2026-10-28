@@ -403,6 +403,15 @@
     "downloadFailed": "Failed to download attachment",
     "downloadFailedWithReason": "Failed to download attachment: {{reason}}"
   },
+  "calendar": {
+    "invite": "Meeting invitation",
+    "cancelled": "Meeting cancelled",
+    "untitled": "Untitled meeting",
+    "repeats": "Part of a repeating series",
+    "add": "Add to calendar",
+    "opened": "Opened in your calendar",
+    "openFailed": "Could not open your calendar"
+  },
   "search": {
     "title": "Search",
     "filters": "Filters",

@@ -33,6 +33,8 @@ export type {
   KanbanColumnType,
   KnownContact,
   Label,
+  MeetingInvite,
+  MeetingInviteTime,
   Message,
   MessageSummary,
   NotificationStatus,
@@ -74,6 +76,7 @@ import type {
   KanbanColumnType,
   KnownContact,
   Label,
+  MeetingInvite,
   Message,
   MessageSummary,
   NotificationStatus,
@@ -495,6 +498,26 @@ export async function listAttachments(messageId: string): Promise<Attachment[]> 
 
 export async function getAttachmentPath(attachmentId: string): Promise<string | null> {
   return invoke<string | null>("get_attachment_path", { attachmentId });
+}
+
+/**
+ * Read the meeting invitation a message carries, if it carries one.
+ *
+ * `null` means "not an invitation" as well as "unreadable payload": the reading
+ * pane shows no card either way and the mail stays readable.
+ */
+export async function getMessageMeetingInvite(
+  messageId: string,
+): Promise<MeetingInvite | null> {
+  return invoke<MeetingInvite | null>("get_message_meeting_invite", { messageId });
+}
+
+/**
+ * Hand the invitation to the system calendar. The backend copies the `.ics` out
+ * of the profile and opens it, which is what puts the meeting in Calendar.app.
+ */
+export async function addMessageMeetingInviteToCalendar(messageId: string): Promise<void> {
+  return invoke<void>("add_message_meeting_invite_to_calendar", { messageId });
 }
 
 export async function downloadAttachment(attachmentId: string, saveTo: string): Promise<string> {

@@ -213,6 +213,34 @@ export interface Attachment {
   is_inline: boolean;
 }
 
+// ─── Calendar types ─────────────────────────────────────────────────────────────
+
+/** @rust src-tauri/src/commands/calendar.rs → InviteTime */
+export interface MeetingInviteTime {
+  /** Seconds since the epoch, only when the sender anchored the value to UTC. */
+  utc_epoch: number | null;
+  /** The zone the value is written in, when the sender named one. */
+  tzid: string | null;
+  /** `YYYY-MM-DDTHH:MM:SS`, or `YYYY-MM-DD` for an all-day event. */
+  local: string;
+  date_only: boolean;
+}
+
+/** @rust src-tauri/src/commands/calendar.rs → MeetingInvite */
+export interface MeetingInvite {
+  attachment_id: string;
+  summary: string | null;
+  location: string | null;
+  organizer_name: string | null;
+  organizer_email: string | null;
+  start: MeetingInviteTime | null;
+  end: MeetingInviteTime | null;
+  all_day: boolean;
+  cancelled: boolean;
+  recurring: boolean;
+  sequence: number | null;
+}
+
 // ─── Kanban types ───────────────────────────────────────────────────────────────
 
 /** @rust pebble-core/src/types.rs → KanbanColumn (rename_all = "lowercase") */

@@ -403,6 +403,15 @@
     "downloadFailed": "下载附件失败",
     "downloadFailedWithReason": "下载附件失败：{{reason}}"
   },
+  "calendar": {
+    "invite": "会议邀请",
+    "cancelled": "会议已取消",
+    "untitled": "未命名会议",
+    "repeats": "属于重复会议",
+    "add": "加入日历",
+    "opened": "已在日历中打开",
+    "openFailed": "无法打开日历"
+  },
   "search": {
     "title": "搜索",
     "filters": "筛选",

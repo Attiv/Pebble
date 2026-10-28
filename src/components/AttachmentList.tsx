@@ -17,6 +17,16 @@ interface Props {
   variant?: "bar" | "panel";
 }
 
+/** A meeting invitation is rendered by `MeetingInviteCard`, not as a file. */
+export function isCalendarAttachment(attachment: Attachment): boolean {
+  const mime = attachment.mime_type.toLowerCase();
+  return (
+    mime.startsWith("text/calendar") ||
+    mime.startsWith("application/ics") ||
+    attachment.filename.toLowerCase().endsWith(".ics")
+  );
+}
+
 function getMimeIcon(mimeType: string) {
   if (mimeType.startsWith("image/")) return Image;
   if (mimeType.startsWith("video/")) return Film;
@@ -69,7 +79,9 @@ export default function AttachmentList({ messageId, variant = "bar" }: Props) {
     listAttachments(messageId)
       .then((list) => {
         if (!cancelled) {
-          setAttachments(list.filter((a) => !a.is_inline));
+          // Inline images decorate the body, and a calendar payload is shown as
+          // a meeting card instead of as a file to download.
+          setAttachments(list.filter((a) => !a.is_inline && !isCalendarAttachment(a)));
         }
       })
       .catch(() => {

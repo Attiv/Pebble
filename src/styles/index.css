@@ -829,6 +829,110 @@ option {
   max-width: none;
 }
 
+/* A meeting invitation is a proposal rather than mail, so it sits above the
+   body in the app's own chrome; only the button belongs to the calendar.
+   Colours come from the app tokens, like the attachment bar: the surface around
+   it is themed per message, but this is a control, not part of the letter. */
+.meeting-invite-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg-secondary);
+}
+
+.meeting-invite-card[data-cancelled="true"] {
+  background: transparent;
+  border-style: dashed;
+}
+
+.meeting-invite-card[data-cancelled="true"] .meeting-invite-card__title {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--color-text-secondary) 55%, transparent);
+}
+
+.meeting-invite-card__icon {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--color-accent);
+}
+
+.meeting-invite-card[data-cancelled="true"] .meeting-invite-card__icon {
+  color: var(--color-text-secondary);
+}
+
+.meeting-invite-card__body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.meeting-invite-card__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.meeting-invite-card__title {
+  margin-top: 2px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--color-text-primary);
+}
+
+.meeting-invite-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.meeting-invite-card__meta svg {
+  flex: 0 0 auto;
+  opacity: 0.75;
+}
+
+.meeting-invite-card__action {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--color-accent);
+  border-radius: 6px;
+  background: var(--color-accent);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.16s ease, opacity 0.14s ease, background-color 0.14s ease;
+}
+
+.meeting-invite-card__action:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-accent) 88%, #000);
+}
+
+.meeting-invite-card__action:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.meeting-invite-card__action:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .attachment-list-title {
   margin-bottom: 8px;
   font-size: var(--msg-label-size, 12px);

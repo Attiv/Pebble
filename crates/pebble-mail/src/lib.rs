@@ -4,6 +4,7 @@
 
 pub(crate) mod backoff;
 pub mod gmail_sync;
+pub mod ics;
 pub mod idle;
 pub mod imap;
 pub mod outlook_sync;

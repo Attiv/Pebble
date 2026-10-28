@@ -1,5 +1,6 @@
-use mail_parser::{Address, HeaderValue, MessageParser, MimeHeaders};
+use mail_parser::{Address, HeaderValue, MessageParser, MessagePart, MimeHeaders};
 use pebble_core::{build_snippet, EmailAddress, PebbleError, Result};
+use std::collections::HashSet;
 
 /// Metadata about a parsed attachment.
 #[derive(Debug, Clone)]
@@ -36,6 +37,31 @@ pub struct ParsedMessage {
     pub snippet: String,
     pub has_attachments: bool,
     pub attachments: Vec<AttachmentData>,
+}
+
+/// Whether a MIME type names an iCalendar payload.
+fn is_calendar_mime(mime_type: &str) -> bool {
+    mime_type.eq_ignore_ascii_case("text/calendar")
+        || mime_type.eq_ignore_ascii_case("application/ics")
+        || mime_type.eq_ignore_ascii_case("application/calendar+xml")
+}
+
+/// Whether a part carries an iCalendar payload, under either of the content
+/// types senders use for one.
+fn is_calendar_part(part: &MessagePart<'_>) -> bool {
+    let Some(content_type) = part.content_type() else {
+        return false;
+    };
+    let base = content_type.ctype();
+    match content_type.subtype() {
+        Some(subtype) => {
+            (base.eq_ignore_ascii_case("text") && subtype.eq_ignore_ascii_case("calendar"))
+                || (base.eq_ignore_ascii_case("application")
+                    && (subtype.eq_ignore_ascii_case("ics")
+                        || subtype.eq_ignore_ascii_case("calendar")))
+        }
+        None => false,
+    }
 }
 
 /// Convert a mail-parser `Address` into a `Vec<EmailAddress>`.
@@ -120,7 +146,7 @@ pub fn parse_raw_email(raw: &[u8]) -> Result<ParsedMessage> {
     let snippet = build_snippet(&body_text, &body_html);
 
     // Attachments
-    let attachments: Vec<AttachmentData> = message
+    let mut attachments: Vec<AttachmentData> = message
         .attachments()
         .map(|part| {
             let filename = part.attachment_name().unwrap_or("unnamed").to_string();
@@ -153,6 +179,48 @@ pub fn parse_raw_email(raw: &[u8]) -> Result<ParsedMessage> {
             }
         })
         .collect();
+
+    // A calendar part that mail-parser did classify as an attachment usually
+    // arrives without a name, and the pipeline keys files off their extension:
+    // an invitation called `unnamed` cannot be handed to the OS calendar.
+    for attachment in &mut attachments {
+        if is_calendar_mime(&attachment.meta.mime_type)
+            && (attachment.meta.filename.is_empty() || attachment.meta.filename == "unnamed")
+        {
+            attachment.meta.filename = "invite.ics".to_string();
+        }
+    }
+
+    // Meeting invitations are not always attachments in the MIME sense: Outlook
+    // sends the event as a `text/calendar` part with no filename, which
+    // mail-parser does not classify as one, so an invitation used to leave no
+    // trace at all — not in the body, not in the attachment list. Keep the part
+    // anyway, under a name the rest of the pipeline can key on, so the reader can
+    // see the meeting and put it in their calendar.
+    let claimed: HashSet<usize> = message.attachments.iter().copied().collect();
+    for (index, part) in message.parts.iter().enumerate() {
+        if claimed.contains(&index) || !is_calendar_part(part) {
+            continue;
+        }
+        let data = part.contents().to_vec();
+        if data.is_empty() {
+            continue;
+        }
+        attachments.push(AttachmentData {
+            meta: AttachmentMeta {
+                filename: part
+                    .attachment_name()
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or("invite.ics")
+                    .to_string(),
+                mime_type: "text/calendar".to_string(),
+                size: data.len(),
+                content_id: part.content_id().map(|id| id.to_string()),
+                is_inline: false,
+            },
+            data,
+        });
+    }
 
     let has_attachments = !attachments.is_empty();
 
@@ -333,6 +401,46 @@ mod tests {
             "Snippet should fall back to HTML body, got: {:?}",
             parsed.snippet
         );
+    }
+
+    #[test]
+    fn keeps_a_calendar_part_that_is_not_shaped_like_an_attachment() {
+        // The shape Outlook sends: a calendar part with no filename and no
+        // disposition, sitting beside the body.
+        let raw = b"From: Organizer <boss@example.com>\r\n\
+                    To: reader@example.com\r\n\
+                    Subject: Invitation: Quarterly review\r\n\
+                    MIME-Version: 1.0\r\n\
+                    Content-Type: multipart/alternative; boundary=\"invite42\"\r\n\
+                    \r\n\
+                    --invite42\r\n\
+                    Content-Type: text/plain; charset=utf-8\r\n\
+                    \r\n\
+                    When: Monday 14:00\r\n\
+                    --invite42\r\n\
+                    Content-Type: text/calendar; method=REQUEST; charset=utf-8\r\n\
+                    \r\n\
+                    BEGIN:VCALENDAR\r\n\
+                    METHOD:REQUEST\r\n\
+                    BEGIN:VEVENT\r\n\
+                    SUMMARY:Quarterly review\r\n\
+                    DTSTART:20261102T060000Z\r\n\
+                    END:VEVENT\r\n\
+                    END:VCALENDAR\r\n\
+                    --invite42--\r\n";
+
+        let parsed = parse_raw_email(raw).unwrap();
+
+        assert!(parsed.has_attachments);
+        let invite = parsed
+            .attachments
+            .iter()
+            .find(|attachment| attachment.meta.mime_type == "text/calendar")
+            .expect("the calendar part is kept");
+        assert_eq!(invite.meta.filename, "invite.ics");
+        assert!(!invite.meta.is_inline);
+        let text = String::from_utf8_lossy(&invite.data);
+        assert!(text.contains("BEGIN:VEVENT"), "payload survives: {text:?}");
     }
 
     #[test]

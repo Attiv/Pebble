@@ -649,6 +649,8 @@ pub fn run() {
             commands::batch::batch_delete,
             commands::batch::batch_mark_read,
             commands::batch::batch_star,
+            commands::calendar::get_message_meeting_invite,
+            commands::calendar::add_message_meeting_invite_to_calendar,
             commands::mark_all_read::mark_account_all_read,
             commands::mark_all_read::mark_all_accounts_read,
             commands::cloud_sync::test_webdav_connection,

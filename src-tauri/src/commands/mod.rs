@@ -5,6 +5,7 @@ pub mod appearance;
 pub mod attachments;
 pub mod autostart;
 pub mod batch;
+pub mod calendar;
 pub mod cloud_sync;
 pub mod compose;
 pub mod contacts;

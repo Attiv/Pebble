@@ -7,6 +7,7 @@ import { useClickOutside } from "@/hooks/useClickOutside";
 import { MessageDetailSkeleton } from "./Skeleton";
 import PrivacyBanner from "./PrivacyBanner";
 import AttachmentList from "./AttachmentList";
+import MeetingInviteCard from "./MeetingInviteCard";
 import SnoozePopover from "../features/inbox/SnoozePopover";
 import { ShadowDomEmail, type MessageLinkContextMenuRequest } from "./ShadowDomEmail";
 import TranslatePopover from "../features/translate/TranslatePopover";
@@ -572,6 +573,10 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
                 padding: "var(--msg-surface-padding)",
               }}
             >
+              {/* A meeting invitation is a proposal rather than mail, so it
+                  sits above the body, inside the reading column. */}
+              {message.has_attachments && <MeetingInviteCard messageId={message.id} />}
+
               {bilingualMode && bilingualLoading ? (
                 <div style={{ fontSize: "13px", color: "var(--color-text-secondary)" }}>{t("common.translating", "Translating...")}</div>
               ) : bilingualMode && bilingualResult ? (
