@@ -427,4 +427,46 @@ mod tests {
         assert!(parse_invite("BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR\n").is_none());
         assert!(parse_invite("not a calendar at all").is_none());
     }
+
+    #[test]
+    fn reads_an_apple_invitation_past_its_timezone_block() {
+        // Verbatim from a real confirmation mail: the `VTIMEZONE` block holds a
+        // `DTSTART` of its own, and the event that matters comes after it.
+        let apple = "BEGIN:VCALENDAR\r\n\
+            CALSCALE:GREGORIAN\r\n\
+            METHOD:PUBLISH\r\n\
+            PRODID:-//Apple Computer\\, Inc//iCal 3.0//EN\r\n\
+            VERSION:2.0\r\n\
+            BEGIN:VTIMEZONE\r\n\
+            TZID:CT\r\n\
+            BEGIN:STANDARD\r\n\
+            TZOFFSETFROM:0900\r\n\
+            TZOFFSETTO:0800\r\n\
+            DTSTART:20110101T020000\r\n\
+            TZNAME:CT\r\n\
+            END:STANDARD\r\n\
+            END:VTIMEZONE\r\n\
+            BEGIN:VEVENT\r\n\
+            SEQUENCE:5\r\n\
+            DTSTART;TZID=CT:20181201T152000\r\n\
+            SUMMARY:Genius Bar 天才吧预约 - iPhone\r\n\
+            DTEND;TZID=CT:20181201T154000\r\n\
+            LOCATION:Apple Mixc Zhengzhou\r\n\
+            DESCRIPTION:更换电池\r\n\
+            END:VEVENT\r\n\
+            END:VCALENDAR\r\n";
+
+        let invite = parse_invite(apple).expect("an invite");
+        assert!(!invite.is_cancelled());
+        assert_eq!(
+            invite.summary.as_deref(),
+            Some("Genius Bar 天才吧预约 - iPhone")
+        );
+        assert_eq!(invite.location.as_deref(), Some("Apple Mixc Zhengzhou"));
+        assert_eq!(invite.sequence, Some(5));
+
+        let start = invite.start.expect("a start");
+        assert_eq!(start.local, "2018-12-01T15:20:00");
+        assert_eq!(start.tzid.as_deref(), Some("CT"));
+    }
 }
