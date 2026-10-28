@@ -690,9 +690,9 @@
     "and": "和",
     "loadImages": "加载图片",
     "trustImages": "仅信任图片",
-    "trustImagesHint": "始终加载该发件人的图片，跟踪器仍会被拦截。",
+    "trustImagesHint": "始终加载这个发件人的图片（所有邮箱），追踪器继续拦截。",
     "trustAll": "完全信任发件人",
-    "trustAllHint": "完全信任该发件人：放行图片，同时不再拦截跟踪器。",
+    "trustAllHint": "完全信任这个发件人（所有邮箱）：加载图片，并且不再剥离追踪器。",
     "settingsTitle": "隐私与跟踪",
     "defaultMode": "默认隐私模式",
     "strict": "严格",
@@ -707,7 +707,8 @@
     "loadTrustedFailed": "加载受信任发件人失败",
     "removeTrustFailed": "移除受信任发件人失败",
     "trustedSenders": "受信任的发件人",
-    "noTrustedSenders": "暂无受信任的发件人。可在邮件的隐私横幅中信任发件人。"
+    "noTrustedSenders": "暂无受信任的发件人。可在邮件的隐私横幅中信任发件人。",
+    "trustedSendersHint": "在这里信任的发件人，对所有邮箱生效 —— 追踪像素的代价不取决于它发到了你哪个地址。"
   },
   "rules": {
     "title": "规则",

@@ -2,7 +2,7 @@ use pebble_core::{build_snippet, PebbleError, Result};
 use rusqlite::{Connection, OptionalExtension};
 use std::collections::HashSet;
 
-const CURRENT_VERSION: u32 = 19;
+const CURRENT_VERSION: u32 = 20;
 const ACCOUNT_COLOR_PRESETS: [&str; 12] = [
     "#0ea5e9", "#22c55e", "#f59e0b", "#8b5cf6", "#f43f5e", "#14b8a6", "#6366f1", "#f97316",
     "#06b6d4", "#ec4899", "#84cc16", "#3b82f6",
@@ -994,6 +994,31 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
                  updated_at INTEGER NOT NULL
              );",
         )?;
+        set_schema_version(&tx, 19)?;
+        tx.commit()?;
+    }
+
+    // Trust used to be keyed on (account_id, email), so the same address could
+    // sit in the table once per mailbox. It is a statement about the sender now,
+    // and a second row for the same address would only ever disagree with the
+    // first: collapse them, keeping the level the reader granted last.
+    if version < 20 {
+        let tx = conn.unchecked_transaction()?;
+        if table_exists(&tx, "trusted_senders")? {
+            tx.execute_batch(
+                "DELETE FROM trusted_senders
+                 WHERE rowid NOT IN (
+                     SELECT t.rowid FROM trusted_senders t
+                     WHERE t.rowid = (
+                         SELECT t2.rowid FROM trusted_senders t2
+                         WHERE t2.email = t.email
+                         ORDER BY CASE t2.trust_type WHEN 'all' THEN 0 ELSE 1 END,
+                                  t2.created_at DESC
+                         LIMIT 1
+                     )
+                 );",
+            )?;
+        }
         set_schema_version(&tx, CURRENT_VERSION)?;
         tx.commit()?;
     }
@@ -2097,5 +2122,51 @@ mod tests {
             .pragma_query_value(None, "foreign_keys", |row| row.get(0))
             .unwrap();
         assert_eq!(foreign_keys, 1, "foreign key enforcement must be restored");
+    }
+
+    /// Trust carried an account id in its key, so a sender could be trusted once
+    /// per mailbox. V20 keeps the strongest of those rows, because after this
+    /// only one of them could ever be read.
+    #[test]
+    fn migration_v20_collapses_trust_rows_to_one_per_sender() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE accounts (id TEXT PRIMARY KEY, email TEXT, display_name TEXT);
+             CREATE TABLE trusted_senders (
+                 account_id TEXT NOT NULL,
+                 email TEXT NOT NULL,
+                 trust_type TEXT NOT NULL,
+                 created_at INTEGER NOT NULL,
+                 PRIMARY KEY (account_id, email)
+             );
+             INSERT INTO accounts VALUES ('a1', 'one@example.com', 'One');
+             INSERT INTO accounts VALUES ('a2', 'two@example.com', 'Two');
+             INSERT INTO trusted_senders VALUES
+                 ('a1', 'news@example.com', 'images', 10),
+                 ('a2', 'news@example.com', 'all', 20),
+                 ('a1', 'only@example.com', 'images', 30);
+             PRAGMA user_version = 19;",
+        )
+        .unwrap();
+
+        run_migrations(&conn).unwrap();
+
+        let mut stmt = conn
+            .prepare("SELECT email, trust_type FROM trusted_senders ORDER BY email")
+            .unwrap();
+        let rows: Vec<(String, String)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .map(|row| row.unwrap())
+            .collect();
+
+        assert_eq!(
+            rows,
+            vec![
+                ("news@example.com".to_string(), "all".to_string()),
+                ("only@example.com".to_string(), "images".to_string()),
+            ],
+            "one row per sender, at the level the reader granted last"
+        );
     }
 }

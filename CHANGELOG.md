@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- Trusting a sender now covers every mailbox, instead of only the one that was open at the time. The trust table was keyed on `(account_id, email)`, so an address had to be trusted once per mailbox — you trusted a sender while reading one account and were asked again the next time that sender wrote to another, which read as the trust never having taken. What a tracking pixel costs does not depend on which of your addresses received it, so the decision is now made about the sender: one row per address, read without an account filter, and removing it from Settings removes it everywhere. Existing rows are collapsed by a migration, keeping the stronger of two levels for the same address; five redundant rows on this machine alone. The banner's tooltips and the Settings list now say "in every mailbox", because the old wording promised exactly what it did not do.
+
 ### Added
 
 - An invitation that Outlook sends as a link rather than a file now says so, with a button to the meeting. Outlook can be configured to invite people with an Outlook Web App link, and a message sent that way carries no calendar data at all — no attachment, no time, no agenda, just an `itemid` URL back to the sender's mailbox and a line explaining how to change the setting. There is nothing in such a mail to read and nothing to hand to a calendar, so the card states that plainly, names the setting that stops it happening again ("Send meeting invitations in iCalendar format"), and offers one click to where the meeting actually lives. The test is deliberately narrow — a Microsoft-hosted mailbox and a `/calendar/item` path — because a false positive would put a meeting card on any mail that merely links to a calendar.

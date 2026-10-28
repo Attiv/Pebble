@@ -50,11 +50,10 @@ pub async fn get_message_with_html(
 #[tauri::command]
 pub async fn is_trusted_sender(
     state: State<'_, AppState>,
-    account_id: String,
     email: String,
 ) -> std::result::Result<bool, PebbleError> {
     let store = state.store.clone();
-    tokio::task::spawn_blocking(move || Ok(store.is_trusted_sender(&account_id, &email)?.is_some()))
+    tokio::task::spawn_blocking(move || Ok(store.is_trusted_sender(&email)?.is_some()))
         .await
         .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?
 }
@@ -199,7 +198,9 @@ fn resolve_privacy_mode(
     message: &Message,
     privacy_mode: PrivacyMode,
 ) -> std::result::Result<PrivacyMode, PebbleError> {
-    let persisted = store.is_trusted_sender(&message.account_id, &message.from_address)?;
+    // Trust travels with the sender, not the mailbox: the reader grants it once
+    // and it holds wherever that sender writes to them.
+    let persisted = store.is_trusted_sender(&message.from_address)?;
 
     let trust_to_mode = |trust: TrustType| match trust {
         TrustType::All => PrivacyMode::TrustedSender(message.from_address.clone()),
@@ -359,6 +360,35 @@ mod tests {
         let mode = resolve_privacy_mode(&store, &message, PrivacyMode::Strict).unwrap();
 
         assert!(matches!(mode, PrivacyMode::Strict));
+    }
+
+    #[test]
+    fn trust_granted_in_one_mailbox_covers_the_others() {
+        let store = Store::open_in_memory().unwrap();
+        let work = make_account("account-1");
+        store.insert_account(&work).unwrap();
+        let home = make_account("account-2");
+        store.insert_account(&home).unwrap();
+        let folder = make_folder(&home.id);
+        store.insert_folder(&folder).unwrap();
+        let message = make_message(&home.id, "trusted@example.com");
+        store.insert_message(&message, &[folder.id]).unwrap();
+
+        // Granted while reading the work mailbox...
+        store
+            .trust_sender(&TrustedSender {
+                account_id: work.id,
+                email: "trusted@example.com".to_string(),
+                trust_type: TrustType::All,
+                created_at: now_timestamp(),
+            })
+            .unwrap();
+
+        // ...and the personal mailbox is covered too, because the decision was
+        // about the sender.
+        let mode = resolve_privacy_mode(&store, &message, PrivacyMode::LoadOnce).unwrap();
+
+        assert!(matches!(mode, PrivacyMode::TrustedSender(_)));
     }
 
     #[test]

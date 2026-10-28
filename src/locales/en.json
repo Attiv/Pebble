@@ -690,9 +690,9 @@
     "and": "and",
     "loadImages": "Load images",
     "trustImages": "Trust images",
-    "trustImagesHint": "Always load images from this sender. Trackers stay blocked.",
+    "trustImagesHint": "Always load images from this sender, in every mailbox. Trackers stay blocked.",
     "trustAll": "Trust sender",
-    "trustAllHint": "Fully trust this sender: load images and stop stripping trackers.",
+    "trustAllHint": "Fully trust this sender, in every mailbox: load images and stop stripping trackers.",
     "settingsTitle": "Privacy & Tracking",
     "defaultMode": "Default privacy mode",
     "strict": "Strict",
@@ -707,7 +707,8 @@
     "loadTrustedFailed": "Failed to load trusted senders",
     "removeTrustFailed": "Failed to remove trusted sender",
     "trustedSenders": "Trusted Senders",
-    "noTrustedSenders": "No trusted senders yet. Trust a sender from the privacy banner in a message."
+    "noTrustedSenders": "No trusted senders yet. Trust a sender from the privacy banner in a message.",
+    "trustedSendersHint": "A sender trusted here is trusted in every mailbox, because what a tracking pixel costs does not depend on which address received it."
   },
   "rules": {
     "title": "Rules",

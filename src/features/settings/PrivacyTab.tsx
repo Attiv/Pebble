@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { useMailStore } from "@/stores/mail.store";
 import { useToastStore } from "@/stores/toast.store";
 import { listTrustedSenders, removeTrustedSender } from "@/lib/api";
 import type { TrustedSender } from "@/lib/api";
@@ -14,20 +13,14 @@ import { Trash2 } from "lucide-react";
 
 export default function PrivacyTab() {
   const { t } = useTranslation();
-  const activeAccountId = useMailStore((s) => s.activeAccountId);
   const [trustedSenders, setTrustedSenders] = useState<TrustedSender[]>([]);
   const [privacyMode, setPrivacyMode] = useState<StoredPrivacyMode>(() =>
     readStoredPrivacyMode(),
   );
 
   useEffect(() => {
-    if (!activeAccountId) {
-      setTrustedSenders((prev) => prev.length === 0 ? prev : []);
-      return;
-    }
-
     let cancelled = false;
-    listTrustedSenders(activeAccountId)
+    listTrustedSenders()
       .then((senders) => {
         if (!cancelled) setTrustedSenders(senders);
       })
@@ -41,7 +34,7 @@ export default function PrivacyTab() {
       });
 
     return () => { cancelled = true; };
-  }, [activeAccountId, t]);
+  }, [t]);
 
   function handlePrivacyModeChange(mode: StoredPrivacyMode) {
     setPrivacyMode(mode);
@@ -49,9 +42,8 @@ export default function PrivacyTab() {
   }
 
   async function handleRemoveTrust(email: string) {
-    if (!activeAccountId) return;
     try {
-      await removeTrustedSender(activeAccountId, email);
+      await removeTrustedSender(email);
       setTrustedSenders((prev) => prev.filter((s) => s.email !== email));
     } catch (err) {
       console.warn("Failed to remove trusted sender", err);
@@ -144,9 +136,15 @@ export default function PrivacyTab() {
 
       {/* Trusted senders */}
       <div>
-        <h3 style={{ fontSize: "14px", fontWeight: 600, marginBottom: "12px" }}>
+        <h3 style={{ fontSize: "14px", fontWeight: 600, marginBottom: "4px" }}>
           {t("privacy.trustedSenders", "Trusted Senders")}
         </h3>
+        <p style={{ margin: "0 0 12px", color: "var(--color-text-secondary)", fontSize: "12px" }}>
+          {t(
+            "privacy.trustedSendersHint",
+            "A sender trusted here is trusted in every mailbox, because what a tracking pixel costs does not depend on which address received it.",
+          )}
+        </p>
         {trustedSenders.length === 0 ? (
           <p style={{ fontSize: "13px", color: "var(--color-text-secondary)" }}>
             {t("privacy.noTrustedSenders", "No trusted senders yet. Trust a sender from the privacy banner in a message.")}

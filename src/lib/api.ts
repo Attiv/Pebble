@@ -411,20 +411,24 @@ export async function dismissFailedPendingMailOps(
 
 // ─── Trusted Senders API ────────────────────────────────────────────────────
 
-export async function listTrustedSenders(accountId: string): Promise<TrustedSender[]> {
-  return invoke<TrustedSender[]>("list_trusted_senders", { accountId });
+/**
+ * Every sender the reader has trusted, with no mailbox filter: the decision is
+ * made about the sender, not about the account they happened to write to.
+ */
+export async function listTrustedSenders(): Promise<TrustedSender[]> {
+  return invoke<TrustedSender[]>("list_trusted_senders");
 }
 
-export async function removeTrustedSender(accountId: string, email: string): Promise<void> {
-  return invoke<void>("remove_trusted_sender", { accountId, email });
+export async function removeTrustedSender(email: string): Promise<void> {
+  return invoke<void>("remove_trusted_sender", { email });
 }
 
 export async function trustSender(accountId: string, email: string, trustType: "images" | "all"): Promise<void> {
   return invoke<void>("trust_sender", { accountId, email, trustType });
 }
 
-export async function isTrustedSender(accountId: string, email: string): Promise<boolean> {
-  return invoke<boolean>("is_trusted_sender", { accountId, email });
+export async function isTrustedSender(email: string): Promise<boolean> {
+  return invoke<boolean>("is_trusted_sender", { email });
 }
 
 // ─── Search API ──────────────────────────────────────────────────────────────
