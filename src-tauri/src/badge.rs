@@ -21,6 +21,12 @@ use tracing::warn;
 
 /// Above this the badge shows `99+`: both the Dock and the Unity launcher
 /// truncate wide numeric labels.
+///
+/// Only the Dock and the Windows overlay read the label; a Linux launcher takes
+/// a plain number, so on that platform this constant and [`badge_label`] have no
+/// caller at all. `ci.yml` runs clippy with `-D warnings` on Linux, where an
+/// unused item is an error, hence the conditional allow.
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
 const MAX_DISPLAYED_COUNT: u32 = 99;
 
 /// Quiet period before recounting, so a sync that stores a thousand messages
@@ -31,6 +37,7 @@ const REFRESH_DEBOUNCE: Duration = Duration::from_millis(250);
 const OVERLAY_SIZE: u32 = 32;
 
 /// Text rendered inside the badge, or `None` when the badge must be removed.
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
 pub fn badge_label(count: u32) -> Option<String> {
     match count {
         0 => None,
