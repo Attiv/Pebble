@@ -22,9 +22,7 @@ interface Props {
   /** Subjects the link-only card; a mail with a real invitation brings its own. */
   subject?: string;
   /**
-   * Whether it is worth asking the backend for a calendar part. A message with
-   * no attachments cannot have one, and skipping the query keeps the common
-   * case free.
+   * Skip ordinary attachment-free mail; Outlook links may need fresh server data.
    */
   hasAttachments?: boolean;
   bodyHtml?: string | null;
@@ -114,9 +112,8 @@ export function formatInviteRange(invite: MeetingInvite, locale: string): string
  * system calendar rather than keeping a copy here: the calendar owns the
  * meeting, and a second copy inside Pebble could only disagree with it.
  *
- * Invitations that arrive as an Outlook Web link have no calendar payload to
- * read, so that case gets its own card — one button to the place the meeting
- * actually lives, and the setting that stops it happening again.
+ * An old Outlook-link message may gain a calendar payload after changing IMAP
+ * retrieval settings; fetch it on demand without rewriting the local message.
  */
 export default function MeetingInviteCard({
   messageId,
@@ -137,11 +134,11 @@ export default function MeetingInviteCard({
   useEffect(() => {
     let cancelled = false;
     setInvite(null);
-    if (!hasAttachments) return;
+    if (!hasAttachments && !linkOnlyUrl) return;
 
     void (async () => {
       try {
-        const result = await getMessageMeetingInvite(messageId);
+        const result = await getMessageMeetingInvite(messageId, !!linkOnlyUrl);
         if (!cancelled) setInvite(result);
       } catch {
         // An unreadable invitation is not an error worth a toast: the mail
@@ -153,12 +150,11 @@ export default function MeetingInviteCard({
     return () => {
       cancelled = true;
     };
-  }, [messageId, hasAttachments]);
+  }, [messageId, hasAttachments, linkOnlyUrl]);
 
   if (!invite && !linkOnlyUrl) return null;
 
-  // An invitation with no payload: the meeting lives in Outlook and all this
-  // message carries is the way back to it.
+  // Keep the link usable while the server payload is pending or unavailable.
   if (!invite) {
     return (
       <section
@@ -183,7 +179,7 @@ export default function MeetingInviteCard({
             <span>
               {t(
                 "calendar.linkOnly",
-                "This invitation arrived as an Outlook link, so its time and agenda are not in this mail.",
+                "This invitation arrived as an Outlook link. Calendar data has not been loaded yet.",
               )}
             </span>
           </div>
@@ -191,7 +187,7 @@ export default function MeetingInviteCard({
             <span>
               {t(
                 "calendar.linkOnlyHint",
-                "In Outlook, turn on “Send meeting invitations in iCalendar format” to receive invitations Pebble can add for you.",
+                "In Outlook, turn on “Send meeting invitations in iCalendar format”, then reopen this mail so Pebble can retrieve the invitation.",
               )}
             </span>
           </div>

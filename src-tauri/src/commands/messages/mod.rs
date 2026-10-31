@@ -1,4 +1,5 @@
 pub mod flags;
+pub mod invitation;
 pub mod lifecycle;
 pub mod provider_dispatch;
 pub mod query;

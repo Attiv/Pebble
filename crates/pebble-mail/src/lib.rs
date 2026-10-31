@@ -7,6 +7,7 @@ pub mod gmail_sync;
 pub mod ics;
 pub mod idle;
 pub mod imap;
+pub mod invitation;
 pub mod outlook_sync;
 pub mod parser;
 pub mod pop3;

@@ -411,8 +411,8 @@
     "add": "Add to calendar",
     "opened": "Opened in your calendar",
     "openFailed": "Could not open your calendar",
-    "linkOnly": "This invitation arrived as an Outlook link, so its time and agenda are not in this mail.",
-    "linkOnlyHint": "In Outlook, turn on “Send meeting invitations in iCalendar format” to receive invitations Pebble can add for you.",
+    "linkOnly": "This invitation arrived as an Outlook link. Calendar data has not been loaded yet.",
+    "linkOnlyHint": "In Outlook, turn on “Send meeting invitations in iCalendar format”, then reopen this mail so Pebble can retrieve the invitation.",
     "openInOutlook": "Open in Outlook"
   },
   "search": {
@@ -464,6 +464,26 @@
     "toggleBilingual": "Toggle bilingual view",
     "ai": "AI",
     "summarizeMessage": "Summarise this email"
+  },
+  "meetingCheck": {
+    "title": "Check meeting invitation",
+    "loading": "Reading this message over IMAP and checking its complete MIME content…",
+    "readOnly": "Checks only this message. Does not modify mail, write to a calendar or send an RSVP. Original content is not sent to AI or uploaded.",
+    "mimeTypes": "MIME types",
+    "calendarParts": "Found {{count}} calendar part(s)",
+    "outlookLinkOnly": "Found an Outlook web link, but no calendar data in the inspectable MIME parts. Open Outlook for meeting details; the link alone does not establish a meeting time.",
+    "noCalendar": "No calendar data found in the inspectable MIME parts. The body may still describe a time; this check does not guess dates.",
+    "rawTimes": "Raw calendar fields below preserve timezone or all-day parameters. They have not been converted to local time or validated. An invitation may be an update or cancellation; checking does not accept it.",
+    "missingStart": "No DTSTART start field extracted",
+    "missingEnd": "No DTEND end or DURATION field extracted",
+    "noEvents": "Found calendar content, but no complete VEVENT was extracted.",
+    "tnef": "Found TNEF / winmail.dat. It has not been decoded and may contain meeting times.",
+    "incomplete": "Incomplete check: some content could not be decoded, is an attached message, or the summary was truncated. This does not establish that the email has no meeting time.",
+    "failed": "Check failed: {{error}}",
+    "retry": "Retry",
+    "copy": "Copy diagnostic result",
+    "copied": "Diagnostic result copied",
+    "copyFailed": "Failed to copy diagnostic result"
   },
   "messageActions": {
     "reply": "Reply",

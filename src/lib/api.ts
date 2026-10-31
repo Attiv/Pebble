@@ -28,6 +28,7 @@ export type {
   Folder,
   HttpProxyConfig,
   ImapSyncFolderSettings,
+  InvitationDiagnostic,
   ImportedBackgroundImage,
   KanbanCard,
   KanbanColumnType,
@@ -72,6 +73,7 @@ import type {
   Folder,
   HttpProxyConfig,
   ImapSyncFolderSettings,
+  InvitationDiagnostic,
   KanbanCard,
   KanbanColumnType,
   KnownContact,
@@ -313,6 +315,10 @@ export async function getMessage(messageId: string): Promise<Message | null> {
   return invoke<Message | null>("get_message", { messageId });
 }
 
+export async function checkMeetingInvitation(messageId: string): Promise<InvitationDiagnostic> {
+  return invoke<InvitationDiagnostic>("check_meeting_invitation", { messageId });
+}
+
 /** Batch-fetch multiple messages in a single IPC call. */
 export async function getMessagesBatch(messageIds: string[]): Promise<Message[]> {
   return invoke<Message[]>("get_messages_batch", { messageIds });
@@ -509,16 +515,17 @@ export async function getAttachmentPath(attachmentId: string): Promise<string | 
  *
  * `null` means "not an invitation" as well as "unreadable payload": the reading
  * pane shows no card either way and the mail stays readable.
+ * `fetchIfMissing` re-reads an old Outlook-link invitation without changing cached mail.
  */
 export async function getMessageMeetingInvite(
   messageId: string,
+  fetchIfMissing = false,
 ): Promise<MeetingInvite | null> {
-  return invoke<MeetingInvite | null>("get_message_meeting_invite", { messageId });
+  return invoke<MeetingInvite | null>("get_message_meeting_invite", { messageId, fetchIfMissing });
 }
 
 /**
- * Hand the invitation to the system calendar. The backend copies the `.ics` out
- * of the profile and opens it, which is what puts the meeting in Calendar.app.
+ * Stage the cached or freshly fetched `.ics` and open the system calendar for import confirmation.
  */
 export async function addMessageMeetingInviteToCalendar(messageId: string): Promise<void> {
   return invoke<void>("add_message_meeting_invite_to_calendar", { messageId });

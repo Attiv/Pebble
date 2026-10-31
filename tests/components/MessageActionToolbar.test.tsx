@@ -87,6 +87,23 @@ vi.mock("../../src/components/ConfirmDialog", () => ({
 
 import MessageActionToolbar from "../../src/components/MessageActionToolbar";
 
+vi.mock("../../src/components/MeetingInvitationDiagnostic", () => ({
+  default: ({ messageId }: { messageId: string }) => <div>Checking {messageId}</div>,
+}));
+
+it("opens an invitation check only on request and closes it when the message changes", () => {
+  const props = { message: makeMessage(), onBack: vi.fn(), onMessageUpdate: vi.fn() };
+  const { rerender } = render(<MessageActionToolbar {...props} />);
+  expect(screen.queryByText("Checking message-1")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "meetingCheck.title" }));
+  expect(screen.getByText("Checking message-1")).toBeTruthy();
+  rerender(<MessageActionToolbar {...props} message={{ ...props.message, id: "message-2" }} />);
+  expect(screen.queryByText("Checking message-1")).toBeNull();
+  expect(screen.queryByText("Checking message-2")).toBeNull();
+  rerender(<MessageActionToolbar {...props} />);
+  expect(screen.queryByText("Checking message-1")).toBeNull();
+});
+
 function makeMessage(): Message {
   return {
     id: "message-1",

@@ -89,6 +89,17 @@ export interface Message extends MessageSummary {
   body_html_raw: string;
 }
 
+/** @rust pebble-mail/src/invitation.rs -> InvitationDiagnostic */
+export interface InvitationDiagnostic {
+  mime_types: string[];
+  calendar_parts: number;
+  methods: string[];
+  events: Array<{ start: string | null; end: string | null; duration: string | null }>;
+  has_outlook_link: boolean;
+  has_tnef: boolean;
+  incomplete: boolean;
+}
+
 export interface PendingMailOpsSummary {
   pending_count: number;
   in_progress_count: number;
@@ -228,7 +239,7 @@ export interface MeetingInviteTime {
 
 /** @rust src-tauri/src/commands/calendar.rs → MeetingInvite */
 export interface MeetingInvite {
-  attachment_id: string;
+  attachment_id: string | null;
   summary: string | null;
   location: string | null;
   organizer_name: string | null;

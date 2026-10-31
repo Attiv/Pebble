@@ -1,4 +1,4 @@
-import { Reply, ReplyAll, Forward, Star, Archive, Trash2, LayoutGrid, RotateCcw } from "lucide-react";
+import { Reply, ReplyAll, Forward, Star, Archive, Trash2, LayoutGrid, RotateCcw, CalendarSearch } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useKanbanStore } from "@/stores/kanban.store";
 import { useToastStore } from "@/stores/toast.store";
@@ -14,6 +14,7 @@ import {
 } from "@/hooks/queries";
 import { useEffect, useState } from "react";
 import ConfirmDialog from "./ConfirmDialog";
+import MeetingInvitationDiagnostic from "./MeetingInvitationDiagnostic";
 
 interface Props {
   message: Message;
@@ -41,6 +42,9 @@ export default function MessageActionToolbar({
   const inKanban = useKanbanStore((s) => s.cardIdSet.has(message.id));
   const [showKanbanPicker, setShowKanbanPicker] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [diagnosticMessageId, setDiagnosticMessageId] = useState<string | null>(null);
+
+  useEffect(() => { setDiagnosticMessageId(null); }, [message.id]);
 
   function invalidateMessageViews(includeUnreadCounts = false) {
     queryClient.invalidateQueries({ queryKey: ["messages"] });
@@ -163,6 +167,11 @@ export default function MessageActionToolbar({
       label: t("messageActions.delete"),
       action: () => setShowDeleteConfirm(true),
     },
+    {
+      icon: CalendarSearch,
+      label: t("meetingCheck.title"),
+      action: () => setDiagnosticMessageId(message.id),
+    },
   ];
 
   return (
@@ -266,6 +275,13 @@ export default function MessageActionToolbar({
         </div>
       </div>
 
+      {diagnosticMessageId === message.id && (
+        <MeetingInvitationDiagnostic
+          key={message.id}
+          messageId={message.id}
+          onClose={() => setDiagnosticMessageId(null)}
+        />
+      )}
       {showDeleteConfirm && (
         <ConfirmDialog
           title={t("messageActions.delete", "Delete")}

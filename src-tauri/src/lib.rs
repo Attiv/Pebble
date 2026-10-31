@@ -577,6 +577,7 @@ pub fn run() {
             commands::messages::query::list_messages,
             commands::messages::query::list_starred_messages,
             commands::messages::query::get_message,
+            commands::messages::invitation::check_meeting_invitation,
             commands::messages::query::get_messages_batch,
             commands::messages::rendering::get_rendered_html,
             commands::messages::rendering::get_message_with_html,

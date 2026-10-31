@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -71,7 +71,7 @@ describe("MeetingInviteCard", () => {
 
     const { container } = render(<MeetingInviteCard messageId="message-1" />);
 
-    await waitFor(() => expect(mocks.getMessageMeetingInvite).toHaveBeenCalledWith("message-1"));
+    await waitFor(() => expect(mocks.getMessageMeetingInvite).toHaveBeenCalledWith("message-1", false));
     expect(container.innerHTML).toBe("");
   });
 
@@ -135,6 +135,7 @@ describe("MeetingInviteCard", () => {
     // Outlook can invite with an Outlook Web link; such a message carries no
     // calendar payload, so there is no button that could add anything.
     mocks.openMessageLink.mockResolvedValueOnce(undefined);
+    mocks.getMessageMeetingInvite.mockResolvedValueOnce(null);
     const body =
       'Microsoft Outlook Web Access: <a href="https://outlook.office365.com/owa/x.com/?itemid=AAMk&amp;exvsurl=1&amp;path=/calendar/item">open</a>';
 
@@ -152,12 +153,46 @@ describe("MeetingInviteCard", () => {
     expect(screen.getByText(/iCalendar format/)).toBeTruthy();
     // Nothing pretended to be a calendar write.
     expect(screen.queryByText("Add to Calendar")).toBeNull();
-    expect(mocks.getMessageMeetingInvite).not.toHaveBeenCalled();
+    expect(mocks.getMessageMeetingInvite).toHaveBeenCalledWith("message-1", true);
 
     fireEvent.click(screen.getByText("Open in Outlook"));
     expect(mocks.openMessageLink).toHaveBeenCalledWith(
       "https://outlook.office365.com/owa/x.com/?itemid=AAMk&exvsurl=1&path=/calendar/item",
     );
+  });
+
+  it("loads an iCalendar invitation from the server when the cached mail is still link-only", async () => {
+    mocks.getMessageMeetingInvite.mockResolvedValueOnce(invite({ attachment_id: null }));
+    render(
+      <MeetingInviteCard
+        messageId="message-1"
+        hasAttachments={false}
+        bodyText="Microsoft Outlook Web Access: https://outlook.office365.com/owa/x.com/?itemid=AAMk&path=/calendar/item"
+      />,
+    );
+    expect(await screen.findByText("Quarterly review")).toBeTruthy();
+    expect(mocks.getMessageMeetingInvite).toHaveBeenCalledWith("message-1", true);
+    expect(screen.getByText("Add to Calendar")).toBeTruthy();
+    expect(mocks.addMessageMeetingInviteToCalendar).not.toHaveBeenCalled();
+  });
+
+  it("keeps the Outlook link usable if fetching the current invitation fails", async () => {
+    mocks.getMessageMeetingInvite.mockRejectedValueOnce(new Error("IMAP unavailable"));
+    render(<MeetingInviteCard messageId="message-1" hasAttachments={false}
+      bodyText="https://outlook.office365.com/owa/x.com/?itemid=AAMk&path=/calendar/item" />);
+    await waitFor(() => expect(mocks.getMessageMeetingInvite).toHaveBeenCalledWith("message-1", true));
+    expect(screen.getByText("Open in Outlook")).toBeTruthy();
+    expect(screen.queryByText("Add to Calendar")).toBeNull();
+  });
+
+  it("does not show a late server invitation after switching to another message", async () => {
+    let resolve!: (value: MeetingInvite) => void;
+    mocks.getMessageMeetingInvite.mockReturnValueOnce(new Promise<MeetingInvite>(r => { resolve = r; }));
+    const { rerender, container } = render(<MeetingInviteCard messageId="message-1" hasAttachments={false}
+      bodyText="https://outlook.office365.com/owa/x.com/?itemid=AAMk&path=/calendar/item" />);
+    rerender(<MeetingInviteCard messageId="message-2" hasAttachments={false} bodyText="Lunch?" />);
+    await act(async () => { resolve(invite()); });
+    expect(container.innerHTML).toBe("");
   });
 
   it("stays out of the way when a mail is neither an invitation nor a link", async () => {

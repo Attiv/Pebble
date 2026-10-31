@@ -1462,6 +1462,67 @@ impl ImapProvider {
         Ok(folders)
     }
 
+    /// Read one complete message without marking it seen. Diagnostics are limited to 20 MiB.
+    pub async fn fetch_message_raw(
+        &self,
+        mailbox: &str,
+        uid: u32,
+        expected_uid_validity: Option<u64>,
+    ) -> Result<Vec<u8>> {
+        const MAX_BYTES: usize = 20 * 1024 * 1024;
+        if uid == 0 {
+            return Err(PebbleError::Validation("Invalid IMAP UID".into()));
+        }
+        let mut guard = self.session.lock().await;
+        let sess = guard
+            .as_mut()
+            .ok_or_else(|| PebbleError::Network("Not connected".into()))?;
+        let mailbox_info =
+            with_imap_timeout("EXAMINE", IMAP_COMMAND_TIMEOUT_SECS, sess.examine(mailbox)).await?;
+        if expected_uid_validity.is_some()
+            && expected_uid_validity != mailbox_info.uid_validity.map(u64::from)
+        {
+            return Err(PebbleError::Validation(
+                "Mailbox UIDVALIDITY changed; sync this mailbox and retry".into(),
+            ));
+        }
+        // Exchange can estimate RFC822.SIZE. A completed literal shorter than this bounded
+        // partial request reaches EOF (RFC 3501 §6.4.5); transport truncation fails try_collect.
+        let query = format!("(UID BODY.PEEK[]<0.{}>)", MAX_BYTES + 1);
+        let fetches = with_imap_timeout(
+            "UID FETCH",
+            IMAP_COMMAND_TIMEOUT_SECS,
+            sess.uid_fetch(uid.to_string(), query),
+        )
+        .await?;
+        let fetches: Vec<async_imap::types::Fetch> = with_imap_timeout(
+            "UID FETCH collect",
+            IMAP_COMMAND_TIMEOUT_SECS,
+            fetches.try_collect(),
+        )
+        .await?;
+        let body = fetches
+            .iter()
+            .filter(|fetch| fetch.uid == Some(uid))
+            .find_map(|fetch| fetch.body())
+            .ok_or_else(|| {
+                PebbleError::Validation(
+                    "Original message was not returned; sync this mailbox and retry".into(),
+                )
+            })?;
+        if body.len() > MAX_BYTES {
+            return Err(PebbleError::Validation(
+                "Meeting invitation checks support messages up to 20 MiB".into(),
+            ));
+        }
+        if body.is_empty() {
+            return Err(PebbleError::Validation(
+                "Original message was empty; sync this mailbox and retry".into(),
+            ));
+        }
+        Ok(body.to_vec())
+    }
+
     /// Fetch raw message bytes from a mailbox.
     /// Returns a list of `(uid, raw_bytes)` pairs.
     pub async fn fetch_messages_raw(
@@ -2261,6 +2322,189 @@ fn parse_flags<'a>(flags: impl Iterator<Item = async_imap::types::Flag<'a>>) -> 
         }
     }
     (is_read, is_starred)
+}
+
+#[cfg(test)]
+mod invitation_fetch_tests {
+    use super::*;
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    async fn mock_provider(
+        response: Option<String>,
+    ) -> (ImapProvider, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut stream = BufReader::new(stream);
+            stream
+                .get_mut()
+                .write_all(b"* OK test server\r\n")
+                .await
+                .unwrap();
+            let mut command = String::new();
+            stream.read_line(&mut command).await.unwrap();
+            assert!(command.contains(" LOGIN "));
+            let tag = command.split_whitespace().next().unwrap();
+            stream
+                .get_mut()
+                .write_all(format!("{tag} OK logged in\r\n").as_bytes())
+                .await
+                .unwrap();
+            command.clear();
+            stream.read_line(&mut command).await.unwrap();
+            assert!(command.contains(" EXAMINE \"INBOX\""));
+            let tag = command.split_whitespace().next().unwrap();
+            stream.get_mut().write_all(format!("* 1 EXISTS\r\n* OK [UIDVALIDITY 7] stable\r\n{tag} OK [READ-ONLY] examined\r\n").as_bytes()).await.unwrap();
+            if let Some(response) = response {
+                command.clear();
+                stream.read_line(&mut command).await.unwrap();
+                let (tag, query) = command.trim_end().split_once(' ').unwrap();
+                assert_eq!(query, "UID FETCH 42 (UID BODY.PEEK[]<0.20971521>)");
+                stream
+                    .get_mut()
+                    .write_all(format!("{response}{tag} OK fetched\r\n").as_bytes())
+                    .await
+                    .unwrap();
+            }
+        });
+        let config = ImapConfig {
+            host: "127.0.0.1".into(),
+            port: address.port(),
+            username: "test".into(),
+            password: "test".into(),
+            security: ConnectionSecurity::Plain,
+            accept_invalid_certs: false,
+            proxy: None,
+        };
+        let provider = ImapProvider::new(config);
+        let tcp = TcpStream::connect(address).await.unwrap();
+        let client = Client::new(PrefixedStream::with_prefix(
+            Vec::new(),
+            InnerStream::Plain(tcp),
+        ));
+        let session = client
+            .login("test", "test")
+            .await
+            .map_err(|(error, _)| error)
+            .unwrap();
+        *provider.session.lock().await = Some(session);
+        (provider, server)
+    }
+
+    #[tokio::test]
+    async fn invitation_fetch_reads_exactly_one_uid_without_setting_seen() {
+        let body = "Content-Type: text/plain\r\n\r\nhello";
+        let response = format!(
+            "* 1 FETCH (UID 42 RFC822.SIZE {} BODY[]<0> {{{}}}\r\n{body})\r\n",
+            body.len(),
+            body.len()
+        );
+        let (provider, server) = mock_provider(Some(response)).await;
+        let raw = provider
+            .fetch_message_raw("INBOX", 42, Some(7))
+            .await
+            .unwrap();
+        assert_eq!(raw, body.as_bytes());
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn invitation_fetch_accepts_complete_literal_when_size_metadata_differs() {
+        let body = "Content-Type: text/plain\r\n\r\ncomplete message";
+        let response = format!(
+            "* 1 FETCH (UID 42 RFC822.SIZE {} BODY[]<0> {{{}}}\r\n{body})\r\n",
+            body.len() + 128,
+            body.len()
+        );
+        let (provider, server) = mock_provider(Some(response)).await;
+        let raw = provider
+            .fetch_message_raw("INBOX", 42, Some(7))
+            .await
+            .unwrap();
+        assert_eq!(raw, body.as_bytes());
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn invitation_fetch_rejects_missing_wrong_uid_and_truncated_literals() {
+        for (response, expected) in [
+            (String::new(), "not returned"),
+            (
+                "* 1 FETCH (UID 99 RFC822.SIZE 3 BODY[]<0> {3}\r\nabc)\r\n".into(),
+                "not returned",
+            ),
+            ("* 1 FETCH (UID 42 BODY[]<0> {0}\r\n)\r\n".into(), "empty"),
+            (
+                "* 1 FETCH (UID 42 BODY[]<0> {1000}\r\nabc".into(),
+                "UID FETCH collect",
+            ),
+        ] {
+            let (provider, server) = mock_provider(Some(response)).await;
+            assert!(provider
+                .fetch_message_raw("INBOX", 42, Some(7))
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains(expected));
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn invitation_fetch_accepts_body_without_size_and_after_metadata_only_response() {
+        let body = "Content-Type: text/plain\r\n\r\ncomplete message";
+        for metadata in ["", "* 1 FETCH (UID 42 RFC822.SIZE 20971521)\r\n"] {
+            let response = format!(
+                "{metadata}* 1 FETCH (UID 42 BODY[]<0> {{{}}}\r\n{body})\r\n",
+                body.len()
+            );
+            let (provider, server) = mock_provider(Some(response)).await;
+            assert_eq!(
+                provider
+                    .fetch_message_raw("INBOX", 42, Some(7))
+                    .await
+                    .unwrap(),
+                body.as_bytes()
+            );
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn invitation_fetch_rejects_actual_body_over_limit_even_if_metadata_underestimates() {
+        let body = "a".repeat(20 * 1024 * 1024 + 1);
+        let response = format!(
+            "* 1 FETCH (UID 42 RFC822.SIZE 3 BODY[]<0> {{{}}}\r\n{body})\r\n",
+            body.len()
+        );
+        let (provider, server) = mock_provider(Some(response)).await;
+        assert!(provider
+            .fetch_message_raw("INBOX", 42, Some(7))
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("20 MiB"));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn invitation_fetch_refuses_stale_uidvalidity_before_fetching() {
+        let (provider, server) = mock_provider(None).await;
+        assert!(provider
+            .fetch_message_raw("INBOX", 42, Some(6))
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("UIDVALIDITY changed"));
+        assert!(provider
+            .fetch_message_raw("INBOX", 0, Some(7))
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid IMAP UID"));
+        server.await.unwrap();
+    }
 }
 
 fn should_sync_listed_mailbox(attributes: &[NameAttribute<'_>]) -> bool {

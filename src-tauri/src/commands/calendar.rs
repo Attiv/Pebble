@@ -1,17 +1,18 @@
 //! Meeting invitations.
 //!
-//! An invitation is a message with an iCalendar payload attached, and this
-//! module is the whole of Pebble's calendar support: read the event out of that
-//! payload so the reader can see what is being proposed, and hand the file to
-//! the system calendar when they accept it. There is deliberately no calendar
+//! Read cached or freshly fetched iCalendar payloads and hand the original file
+//! to the system calendar when the user chooses Add to Calendar. There is no calendar
 //! store here — the reader's calendar owns the meeting, and a copy inside Pebble
 //! could only ever disagree with it.
 
+use crate::commands::messages::invitation::read_original_imap_message;
 use crate::state::AppState;
 use pebble_core::{Attachment, PebbleError};
 use pebble_mail::ics::{parse_invite, CalendarInvite, CalendarTime};
+use pebble_mail::invitation::calendar_payload;
 use serde::Serialize;
-use std::path::Path;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use tauri::State;
 use tracing::{info, warn};
 
@@ -29,7 +30,8 @@ pub struct InviteTime {
 /// One invitation, flattened for the reading pane.
 #[derive(Debug, Serialize)]
 pub struct MeetingInvite {
-    pub attachment_id: String,
+    /// None when the invitation was fetched without changing the local attachment cache.
+    pub attachment_id: Option<String>,
     pub summary: Option<String>,
     pub location: Option<String>,
     pub organizer_name: Option<String>,
@@ -56,9 +58,9 @@ impl From<CalendarTime> for InviteTime {
 }
 
 impl MeetingInvite {
-    fn new(attachment_id: &str, invite: CalendarInvite) -> Self {
+    fn new(attachment_id: Option<&str>, invite: CalendarInvite) -> Self {
         Self {
-            attachment_id: attachment_id.to_string(),
+            attachment_id: attachment_id.map(str::to_owned),
             cancelled: invite.is_cancelled(),
             all_day: invite.is_all_day(),
             recurring: invite.recurrence.is_some(),
@@ -89,12 +91,35 @@ fn is_calendar(attachment: &Attachment) -> bool {
         || attachment.filename.to_ascii_lowercase().ends_with(".ics")
 }
 
-fn read_invite(attachment: &Attachment) -> Option<String> {
-    let path = attachment.local_path.as_ref()?;
-    let bytes = std::fs::read(path).ok()?;
-    // iCalendar is UTF-8 by definition; a sender that got the encoding wrong is
-    // still worth showing rather than dropping the invitation.
-    Some(String::from_utf8_lossy(&bytes).into_owned())
+async fn load_invitation(
+    state: &AppState,
+    message_id: &str,
+    fetch_if_missing: bool,
+) -> Result<Option<(Option<String>, Vec<u8>)>, PebbleError> {
+    if let Some(attachment) = calendar_attachment(state, message_id)? {
+        if let Some(bytes) = attachment
+            .local_path
+            .as_ref()
+            .and_then(|path| std::fs::read(path).ok())
+        {
+            return Ok(Some((Some(attachment.id), bytes)));
+        }
+        warn!(
+            message_id,
+            "A calendar attachment has no readable file on disk"
+        );
+    }
+    if !fetch_if_missing {
+        return Ok(None);
+    }
+
+    let (message, raw) = read_original_imap_message(state, message_id).await?;
+    let payload = tokio::task::spawn_blocking(move || {
+        calendar_payload(&raw, message.message_id_header.as_deref())
+    })
+    .await
+    .map_err(|error| PebbleError::Internal(format!("Invitation parsing task failed: {error}")))??;
+    Ok(payload.map(|text| (None, text.into_bytes())))
 }
 
 /// Read the invitation carried by a message.
@@ -102,49 +127,39 @@ fn read_invite(attachment: &Attachment) -> Option<String> {
 /// `None` covers both "this message is not an invitation" and "the payload
 /// could not be read" — the reading pane shows no card in either case, and the
 /// mail itself stays readable.
+/// `fetch_if_missing` allows an IMAP read for old Outlook-link messages; it never rewrites mail.
 #[tauri::command]
 pub async fn get_message_meeting_invite(
     state: State<'_, AppState>,
     message_id: String,
+    fetch_if_missing: Option<bool>,
 ) -> std::result::Result<Option<MeetingInvite>, PebbleError> {
-    let Some(attachment) = calendar_attachment(&state, &message_id)? else {
+    let Some((attachment_id, bytes)) =
+        load_invitation(&state, &message_id, fetch_if_missing.unwrap_or(false)).await?
+    else {
         return Ok(None);
     };
-    let Some(text) = read_invite(&attachment) else {
-        warn!(
-            message_id,
-            "A calendar attachment has no readable file on disk"
-        );
-        return Ok(None);
-    };
-    let Some(invite) = parse_invite(&text) else {
+    let Some(invite) = parse_invite(&String::from_utf8_lossy(&bytes)) else {
         warn!(message_id, "A calendar attachment holds no VEVENT");
         return Ok(None);
     };
-    Ok(Some(MeetingInvite::new(&attachment.id, invite)))
+    Ok(Some(MeetingInvite::new(attachment_id.as_deref(), invite)))
 }
 
 /// Hand the invitation to the system calendar.
 ///
-/// The file is copied out of the profile first: opening the stored copy would
-/// put a path owned by Pebble in front of another application, and a cleanup
-/// pass could remove it underneath the calendar while it reads.
+/// Stage private original bytes, so the calendar never receives a profile-owned attachment path.
 #[tauri::command]
 pub async fn add_message_meeting_invite_to_calendar(
     state: State<'_, AppState>,
     message_id: String,
 ) -> std::result::Result<(), PebbleError> {
-    let attachment = calendar_attachment(&state, &message_id)?.ok_or_else(|| {
-        PebbleError::Validation(format!("Message {message_id} carries no invitation"))
-    })?;
-    let source = attachment
-        .local_path
-        .as_ref()
-        .ok_or_else(|| PebbleError::Internal("Invitation file is not available".to_string()))?;
-
-    let target = std::env::temp_dir().join(format!("pebble-invite-{}.ics", attachment.id));
-    std::fs::copy(source, &target)
-        .map_err(|e| PebbleError::Internal(format!("Could not stage the invitation: {e}")))?;
+    let (_, bytes) = load_invitation(&state, &message_id, true)
+        .await?
+        .ok_or_else(|| {
+            PebbleError::Validation(format!("Message {message_id} carries no invitation"))
+        })?;
+    let target = stage_invitation(&bytes)?;
 
     open_with_system(&target)
         .map_err(|e| PebbleError::Internal(format!("Could not open the calendar: {e}")))?;
@@ -154,6 +169,35 @@ pub async fn add_message_meeting_invite_to_calendar(
         "Handed a meeting invitation to the system calendar"
     );
     Ok(())
+}
+
+fn stage_invitation(bytes: &[u8]) -> Result<PathBuf, PebbleError> {
+    let invite = parse_invite(&String::from_utf8_lossy(bytes))
+        .ok_or_else(|| PebbleError::Validation("No readable calendar event found".into()))?;
+    if invite.is_cancelled() {
+        return Err(PebbleError::Validation(
+            "This invitation has been cancelled; reopen the message for current details".into(),
+        ));
+    }
+    let target = std::env::temp_dir().join(format!("pebble-invite-{}.ics", pebble_core::new_id()));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&target).map_err(|error| {
+        PebbleError::Internal(format!("Could not stage the invitation: {error}"))
+    })?;
+    if let Err(error) = file.write_all(bytes) {
+        drop(file);
+        let _ = std::fs::remove_file(&target);
+        return Err(PebbleError::Internal(format!(
+            "Could not write the invitation: {error}"
+        )));
+    }
+    Ok(target)
 }
 
 fn open_with_system(path: &Path) -> std::io::Result<()> {
@@ -183,4 +227,28 @@ fn open_with_system(path: &Path) -> std::io::Result<()> {
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stages_the_original_invitation_privately_without_guessing_event_fields() {
+        let bytes = b"BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:original@example.com\r\nDTSTART;TZID=Singapore Standard Time:20261104T100000\r\nSUMMARY:Review\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let path = stage_invitation(bytes).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        std::fs::remove_file(path).unwrap();
+        let cancelled = String::from_utf8_lossy(bytes).replace("METHOD:REQUEST", "METHOD:CANCEL");
+        assert!(stage_invitation(cancelled.as_bytes()).is_err());
+        assert!(stage_invitation(b"not a calendar event").is_err());
+    }
 }

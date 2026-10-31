@@ -10,6 +10,7 @@ interface Props {
   busy?: boolean;
   confirmDisabled?: boolean;
   busyConfirmLabel?: string;
+  scrollable?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -35,6 +36,7 @@ export default function ConfirmDialog({
   busy = false,
   confirmDisabled = false,
   busyConfirmLabel,
+  scrollable = false,
   onConfirm,
   onCancel,
 }: Props) {
@@ -55,7 +57,7 @@ export default function ConfirmDialog({
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
     // For destructive actions, focus Cancel by default to prevent accidental confirmation
-    if (destructive) {
+    if (destructive || confirmRef.current?.disabled) {
       cancelRef.current?.focus();
     } else {
       confirmRef.current?.focus();
@@ -136,7 +138,9 @@ export default function ConfirmDialog({
         </h3>
         <p
           id="confirm-dialog-message"
-          style={{ margin: 0, fontSize: "13px", color: "var(--color-text-secondary)", lineHeight: 1.5, whiteSpace: "pre-wrap" }}
+          tabIndex={scrollable ? 0 : undefined}
+          aria-live={scrollable ? "polite" : undefined}
+          style={{ margin: 0, fontSize: "13px", color: "var(--color-text-secondary)", lineHeight: 1.5, whiteSpace: "pre-wrap", ...(scrollable ? { maxHeight: "55vh", overflowY: "auto", overflowWrap: "anywhere" } as const : {}) }}
         >
           {message}
         </p>

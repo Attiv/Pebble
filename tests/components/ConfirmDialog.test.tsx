@@ -9,6 +9,27 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("ConfirmDialog", () => {
+  it("keeps long diagnostic text keyboard-scrollable and focuses Close while copying is disabled", () => {
+    render(
+      <ConfirmDialog
+        title="Checking invitation"
+        message="Reading MIME content"
+        scrollable
+        confirmDisabled
+        confirmLabel="Copy"
+        cancelLabel="Close"
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    const message = screen.getByText("Reading MIME content");
+    expect(message.tabIndex).toBe(0);
+    expect(message.style.overflowY).toBe("auto");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close" }));
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(message);
+  });
+
   it("keeps focus inside the dialog and restores the previous focus on close", () => {
     const opener = document.createElement("button");
     document.body.appendChild(opener);
