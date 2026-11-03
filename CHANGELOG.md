@@ -6,6 +6,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-11-03
+
+### Added
+
+- The sidebar now has two styles, switchable in Settings › Appearance. **Grouped**, upstream's default, gives every account its own collapsible group of system and custom folders under a merged "Overview" entry; **Classic** is the single folder list for whichever mailbox is selected. This fork opens on Classic, because that is the sidebar carrying the account list — an unread badge on each avatar and one-click "mark all as read" per mailbox — which five releases of work went into. Nothing is lost by switching: both styles read the same stores, so the account selection, the folder selection and the unread counts carry across.
+- Recipients in the message detail and in thread messages are chips rather than a line of text. A long `To` list used to push the date out of the header and wrap the envelope into a paragraph of addresses; the chips cap the visible rows at three and put the rest behind a "+N more" toggle that can be collapsed again. Each chip carries its own contact action, so the sender's action is the only one that still sits on the sender line.
+- Attachment rows are cards with a file-type icon and a tinted tile, replacing the flat icon-and-name rows. The icon and its colour come from the MIME type and the filename together, so a `.docx` no longer shares an icon with a `.zip` that arrived as `application/octet-stream`.
+
+### Fixed
+
+- Links inside a message body are readable in dark mode. The body is rendered in a shadow root with a light-authored palette, and the link colour was taken from the app's accent — which on a dark theme lands close to the mail's own dark text. A dedicated `--color-email-link` token now holds a blue that survives both, and the dark theme pins authored mail to a light surface instead of letting a colour-scheme change repaint it.
+- Closing the window before the frontend's close listener registers no longer exits the app. The hide-to-tray decision was made in JavaScript, so a close in the first moments after launch went straight past it; the Rust side now makes the same decision from the stored preference, and the JS listener only narrows it.
+- The macOS traffic lights stay in the top-left corner of the titlebar rather than drifting with the window chrome.
+- Switching mailboxes no longer closes the folder list on its own, and the message-detail typography pass (sender line, subject, meta rows) now sets weight and size per row instead of inheriting one size throughout.
+
+### Changed
+
+- Upstream `QingJ01/Pebble` is merged up to `72bcdb1`, twelve commits that had sat unmerged since `v0.1.5`. The fork's own work is unaffected; the two sidebar styles are the only place where the two lines of development met and had to be reconciled by hand.
+
 ## [0.1.9] - 2026-10-28
 
 ### Changed
@@ -423,7 +442,8 @@ This release includes:
 - Windows installers are not code-signed yet, so Windows SmartScreen may show a warning.
 - Outlook support is still experimental and depends on Microsoft Graph permissions configured by the user.
 
-[Unreleased]: https://github.com/Attiv/Pebble/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/Attiv/Pebble/compare/v0.1.10...HEAD
+[0.1.10]: https://github.com/Attiv/Pebble/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/Attiv/Pebble/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/Attiv/Pebble/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/Attiv/Pebble/compare/v0.1.6...v0.1.7

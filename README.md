@@ -124,7 +124,7 @@ This fork shares `v0.1.5` with upstream and has diverged since. Everything below
 - Bilingual translation prints the source sentence once, and translates into the reader's language rather than out of it.
 - The model field on both AI settings is a dropdown of known names that also accepts typing.
 
-Upstream's own work after `v0.1.5` — classic and grouped sidebar styles, attachment type icons, collapsible recipient chips, a typography pass — is not merged into this branch yet.
+Upstream's own work after `v0.1.5` — the two sidebar styles, attachment type icons, collapsible recipient chips, a typography pass — is merged here as of `v0.1.10`. This fork opens on the Classic sidebar, because that is the one carrying the account list above.
 
 ## Screenshots
 
