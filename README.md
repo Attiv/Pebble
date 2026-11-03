@@ -80,6 +80,52 @@ Pebble currently supports Gmail, IMAP, POP3, and experimental Outlook accounts.
 - Start hidden to system tray option.
 - `mailto:` protocol handler for composing mail from external apps.
 
+## Beyond upstream
+
+This fork shares `v0.1.5` with upstream and has diverged since. Everything below is in this branch and not in `QingJ01/Pebble`; `CHANGELOG.md` carries the long version of each entry.
+
+### AI assistant
+
+- A separate AI configuration (Settings › AI), isolated from the translation engine: its own provider, key, and storage. OpenAI-compatible, or a generic request/response shape for anything else.
+- A summary card in the reader, in the interface language or one you pick, with copy and retry.
+- A compose-side assistant: rewrite to a tone and length, proofread, draft, and translate. Every result opens in a review dialog before it touches the body.
+
+### Reading
+
+- Eight message themes — Card, Mailbox, Letter, Console, Claude, WeChat, Telegram, iMessage — each deciding arrangement as well as colour, and each of the four brand skins carrying its own dark palette.
+- Forwarded and quoted mail folds into a card, including the `<hr>` plus header block Outlook emits, with the older chain one level down.
+- A context menu on links inside a message: copy the address, open it, or write to it. It works inside the shadow root, where the native menu never reaches.
+- Meeting invitations render as a card — time, place, organiser, cancellation — and can be handed to the system calendar as the original `.ics`. An invitation Outlook sent as a web link says so instead of pretending to be a meeting.
+- Inline CID images render, with a loading state rather than a blank frame.
+- `Escape` closes the open message before it does anything else.
+
+### Writing
+
+- Reply and forward keep the original beside the editor — right on wide screens, above on narrow ones — and render a forward chain as a read-only card instead of flattening tables into the editor. Drafts autosave the quoted context too.
+
+### Interface
+
+- One switch for motion. Turning it off stops every animation and stagger delay.
+- Sidebar account list with an unread badge on each avatar, and one-click "mark all as read" per mailbox: bulk on Gmail and IMAP, queued and retried when the provider cannot be reached.
+- Window position and size are remembered, and discarded when no attached display still contains them.
+- Own resize grips on macOS 26, and an unread badge on the app icon — Dock, launcher, taskbar overlay — that stays correct while the window sits in the tray.
+- Per-row unread dot, hover actions, and popovers that animate in; all of it under the motion switch.
+
+### Accounts and network
+
+- IMAP sign-in with an OAuth2 token (XOAUTH2) for Outlook / Exchange Online: an app-owned single-tenant client, an overridable tenant, and renewal when the token expires.
+- iCloud Mail as a one-click preset, with the app-specific-password hint.
+- Gmail API requests are paced, and a failure is reported rather than shown as an empty mailbox; folder sync stores each message as it arrives.
+- "Trust sender" covers every mailbox, with a migration that collapses the old per-account rows.
+
+### Elsewhere
+
+- Search, Snoozed, and the Kanban board follow the account selected in the sidebar.
+- Bilingual translation prints the source sentence once, and translates into the reader's language rather than out of it.
+- The model field on both AI settings is a dropdown of known names that also accepts typing.
+
+Upstream's own work after `v0.1.5` — classic and grouped sidebar styles, attachment type icons, collapsible recipient chips, a typography pass — is not merged into this branch yet.
+
 ## Screenshots
 
 <table>
