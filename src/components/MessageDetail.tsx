@@ -28,9 +28,8 @@ import { useUIStore } from "@/stores/ui.store";
 import SelectionActionPopover from "./SelectionActionPopover";
 import LinkActionPopover from "./LinkActionPopover";
 import MessageThemePicker from "./MessageThemePicker";
-import type { EmailAddress } from "@/lib/api";
 import ContactAddressAction from "./ContactAddressAction";
-import { uniqueContactParticipants } from "./contact-participants";
+import MessageParticipants from "./MessageParticipants";
 
 interface Props {
   messageId: string;
@@ -46,18 +45,6 @@ function formatFullDate(timestamp: number): string {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function formatRecipient(address: EmailAddress): string {
-  const name = address.name?.trim();
-  const email = address.address.trim();
-  if (name && email) return `${name} <${email}>`;
-  if (email) return `<${email}>`;
-  return name ?? "";
-}
-
-function formatRecipients(addresses: EmailAddress[]): string {
-  return addresses.map(formatRecipient).filter(Boolean).join(", ");
 }
 
 export default function MessageDetail({ messageId, onBack, folderRole }: Props) {
@@ -313,13 +300,10 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
     );
   }
 
-  const recipientLine = formatRecipients(message.to_list);
-  const ccLine = formatRecipients(message.cc_list);
-  const contactParticipants = uniqueContactParticipants(
-    { name: message.from_name, address: message.from_address },
-    message.to_list,
-    message.cc_list,
-  );
+  const contactParticipantsGroups = [
+    { label: t("messageDetail.to", "To:"), participants: message.to_list },
+    { label: t("messageDetail.cc", "Cc:"), participants: message.cc_list },
+  ];
 
   /* ── Theme layout ───────────────────────────────────────────────────────────
    * Every structural decision comes from `theme.layout`; nothing below branches
@@ -416,52 +400,27 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
         {message.from_name && (
           <span className="message-detail-from-address">&lt;{message.from_address}&gt;</span>
         )}
+        <ContactAddressAction
+          accountId={message.account_id}
+          name={message.from_name}
+          address={message.from_address}
+        />
       </div>
       {/* The envelope details are a definition list, not a second paragraph:
           a muted label column puts "to / cc / date" clearly below the sender
           line and well below the subject. */}
       <div className="message-detail-meta">
-        {recipientLine && (
-          <div className="message-detail-meta-row">
-            <span className="message-detail-meta-label">{t("messageDetail.to", "To")}</span>
-            <span
-              className="message-detail-meta-value message-detail-recipients"
-              title={recipientLine}
-            >
-              {recipientLine}
-            </span>
-          </div>
-        )}
-        {ccLine && (
-          <div className="message-detail-meta-row">
-            <span className="message-detail-meta-label">{t("messageDetail.cc", "Cc")}</span>
-            <span
-              className="message-detail-meta-value message-detail-recipients"
-              title={ccLine}
-            >
-              {ccLine}
-            </span>
-          </div>
-        )}
+        {/* Recipients are chips rather than a line of text: a long To list used
+            to push the date out of the header. The chip row collapses after a
+            couple of addresses and is the one place a participant's contact
+            actions live, so there is no separate contacts row below it. */}
+        <MessageParticipants accountId={message.account_id} groups={contactParticipantsGroups} />
         <div className="message-detail-meta-row">
           <span className="message-detail-meta-label">{t("messageDetail.date", "Date")}</span>
           <span className="message-detail-meta-value message-detail-date">
             {formatFullDate(message.date)}
           </span>
         </div>
-      </div>
-      <div
-        className="message-detail-contacts"
-        aria-label={t("contacts.participantActions", "Contact actions")}
-      >
-        {contactParticipants.map((participant) => (
-          <ContactAddressAction
-            key={participant.address.toLowerCase()}
-            accountId={message.account_id}
-            name={participant.name}
-            address={participant.address}
-          />
-        ))}
       </div>
     </div>
   );

@@ -250,7 +250,9 @@ describe("MessageDetail themes", () => {
 
       expect(screen.getByRole("heading", { name: "Quarterly numbers" })).toBeTruthy();
       expect(screen.getByText("Sender")).toBeTruthy();
-      expect(screen.getByText("sender@example.com")).toBeTruthy();
+      // The address appears twice: once in the sender line and once as the
+      // sender's own contact action.
+      expect(screen.getAllByText(/sender@example\.com/).length).toBeGreaterThan(0);
       expect(screen.getByRole("region", { name: "Message body" })).toBeTruthy();
       expect(container().getAttribute("data-message-theme")).toBe(theme.id);
       expect(container().getAttribute("data-msg-toolbar")).toBe(theme.layout.toolbar);

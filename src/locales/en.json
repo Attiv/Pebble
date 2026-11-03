@@ -54,6 +54,8 @@
     "search": "Search",
     "mailFolders": "Mail folders",
     "tools": "Tools",
+    "overview": "Overview",
+    "noFolders": "No folders yet",
     "allAccounts": "All accounts",
     "unreadCount": "{{count}} unread",
     "unreadCount_other": "{{count}} unread"
@@ -171,6 +173,11 @@
     "themeDarkDesc": "Easy on the eyes",
     "themeSystem": "System",
     "themeSystemDesc": "Follows your OS setting",
+    "sidebarStyle": "Sidebar style",
+    "sidebarStyleGrouped": "Grouped by account",
+    "sidebarStyleGroupedDesc": "Each account groups its system and custom folders and can be collapsed",
+    "sidebarStyleClassic": "Classic",
+    "sidebarStyleClassicDesc": "Account dropdown with a single folder list for all accounts",
     "messageTheme": "Message theme",
     "messageThemeDesc": "Visual template for the message detail view. Also switchable from the palette icon inside a message.",
     "motion": "Motion",
@@ -393,7 +400,8 @@
     "syncNow": "Sync now",
     "stopSync": "Stop sync",
     "keepRunningInBackground": "Keep running in background on close",
-    "exitOnClose": "Exit on close"
+    "keepRunningBackgroundEnabled": "Keep running in background on close: on",
+    "keepRunningBackgroundDisabled": "Keep running in background on close: off"
   },
   "attachments": {
     "title": "Attachments",
@@ -927,8 +935,8 @@
   },
   "messageDetail": {
     "body": "Message body",
-    "to": "To",
-    "cc": "Cc",
+    "to": "To:",
+    "cc": "Cc:",
     "from": "From",
     "date": "Date",
     "forwardedMessage": "Forwarded message",
@@ -978,5 +986,9 @@
     "statusExpiresIn": "Token renews in about {{minutes}} min",
     "statusRenewsNextSync": "Token renews on the next sync",
     "statusTenant": "Tenant: {{tenant}}"
+  },
+  "participants": {
+    "more": "+{{count}} more",
+    "showLess": "Show less"
   }
 }

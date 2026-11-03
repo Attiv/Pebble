@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
-import { File, FileText, Image, FileArchive, Film, Music, Download, Loader, Check } from "lucide-react";
+import { Download, Loader, Check } from "lucide-react";
 import { listAttachments, downloadAttachment } from "@/lib/api";
 import type { Attachment } from "@/lib/api";
 import { sanitizeFilename } from "@/lib/sanitizeFilename";
+import { attachmentVisual } from "./attachmentVisual";
 import { useToastStore } from "@/stores/toast.store";
 
 interface Props {
@@ -25,15 +26,6 @@ export function isCalendarAttachment(attachment: Attachment): boolean {
     mime.startsWith("application/ics") ||
     attachment.filename.toLowerCase().endsWith(".ics")
   );
-}
-
-function getMimeIcon(mimeType: string) {
-  if (mimeType.startsWith("image/")) return Image;
-  if (mimeType.startsWith("video/")) return Film;
-  if (mimeType.startsWith("audio/")) return Music;
-  if (mimeType.includes("zip") || mimeType.includes("archive") || mimeType.includes("compressed") || mimeType.includes("tar") || mimeType.includes("rar")) return FileArchive;
-  if (mimeType.includes("text") || mimeType.includes("pdf") || mimeType.includes("document") || mimeType.includes("word")) return FileText;
-  return File;
 }
 
 function formatFileSize(bytes: number): string {
@@ -124,6 +116,7 @@ export default function AttachmentList({ messageId, variant = "bar" }: Props) {
   if (attachments.length === 0) return null;
 
   return (
+
     <div className="attachment-list" data-variant={variant}>
       <div className="attachment-list-inner">
         <div className="attachment-list-title">
@@ -131,27 +124,32 @@ export default function AttachmentList({ messageId, variant = "bar" }: Props) {
         </div>
         <div className="attachment-list-items">
           {attachments.map((attachment) => {
-            const Icon = getMimeIcon(attachment.mime_type);
+            const { Icon, color } = attachmentVisual(attachment.mime_type, attachment.filename);
             const isDownloading = downloadingId === attachment.id;
 
             return (
-              <div key={attachment.id} className="attachment-list-row">
-                <Icon size={16} className="attachment-list-icon" style={{ flexShrink: 0 }} />
-                <span className="attachment-list-name">{attachment.filename}</span>
-                <span className="attachment-list-size">{formatFileSize(attachment.size)}</span>
-                <div style={{ display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
+              <div key={attachment.id} className="attachment-card">
+                <div className="attachment-icon-tile" style={{ backgroundColor: `${color}1f` }}>
+                  <Icon size={17} color={color} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="attachment-name" title={attachment.filename}>
+                    {attachment.filename}
+                  </div>
+                  <div className="attachment-meta">{formatFileSize(attachment.size)}</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
                   {isDownloading && downloadProgress[attachment.id] != null && (
                     <span className="attachment-list-progress">
                       {downloadProgress[attachment.id]}%
                     </span>
                   )}
                   <button
-                    className="attachment-list-download"
+                    className="attachment-download"
                     onClick={() => handleDownload(attachment)}
                     disabled={isDownloading}
                     aria-label={t("attachments.download") + ": " + attachment.filename}
                     title={isDownloading ? t("attachments.downloading") : downloadedPaths[attachment.id] ? downloadedPaths[attachment.id] : t("attachments.download")}
-                    style={{ opacity: isDownloading ? 0.5 : 1 }}
                   >
                     {isDownloading ? (
                       <Loader size={14} className="spinner" />

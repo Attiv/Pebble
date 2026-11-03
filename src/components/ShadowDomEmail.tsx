@@ -142,20 +142,15 @@ export function shadowEmailCss(theme?: MessageTheme | null): string {
         .pebble-image-frame[data-image-state="error"] .pebble-image-loading::before {
           display: none;
         }
-        a { color: var(--color-accent); }
+        a[href] { color: var(--color-email-link); }
         .pebble-email-content {
           box-sizing: border-box;
+          display: var(--email-content-display);
           max-width: 100%;
           overflow-x: auto;
-          color: inherit;
-          background: transparent;
-        }
-        :host-context([data-theme="dark"]) .pebble-email-content {
-          display: inline-block;
-          max-width: 100%;
-          color-scheme: light;
-          color: #202124;
-          background: #fff;
+          color-scheme: var(--email-content-color-scheme);
+          color: var(--email-content-color);
+          background: var(--email-content-bg);
         }
         pre {
           white-space: pre-wrap;

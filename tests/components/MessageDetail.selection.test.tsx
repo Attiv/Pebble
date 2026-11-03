@@ -38,13 +38,25 @@ const mockMessage: Message = {
   body_html_raw: "",
 };
 
+const bulkMessage: Message = {
+  ...mockMessage,
+  id: "message-bulk",
+  to_list: Array.from({ length: 10 }, (_, index) => ({ name: `Bulk ${index}`, address: `bulk${index}@example.com` })),
+  cc_list: [],
+};
+
 vi.mock("react-i18next", () => ({
   initReactI18next: {
     type: "3rdParty",
     init: vi.fn(),
   },
   useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback ?? _key,
+    t: (_key: string, options?: unknown) => {
+      if (typeof options === "string") return options;
+      const opts = (options ?? {}) as Record<string, string | number>;
+      const template = typeof opts.defaultValue === "string" ? opts.defaultValue : _key;
+      return template.replace(/\{\{(\w+)\}\}/g, (_match, name) => String(opts[name] ?? ""));
+    },
   }),
 }));
 
@@ -57,7 +69,7 @@ vi.mock("../../src/hooks/useMessageLoader", () => ({
     privacyMocks.calls.push({ messageId, privacyMode });
     return {
     message: {
-      ...mockMessage,
+      ...(messageId === "message-bulk" ? bulkMessage : mockMessage),
       id: messageId,
       from_address: messageId === "message-1" ? "sender@example.com" : "second@example.com",
     },
@@ -186,6 +198,30 @@ describe("MessageDetail selected-text context actions", () => {
     expect(screen.queryByText(/current@example\.com/)).toBeNull();
   });
 
+  it("renders the sender line above the envelope rows, with the date below it", () => {
+    render(<MessageDetail messageId="message-1" onBack={vi.fn()} />);
+
+    // The header is styled by the theme's stylesheet rather than by inline
+    // styles, so this asserts the structure each template builds on: a title,
+    // a sender line, then the envelope rows with the date last.
+    const heading = screen.getByRole("heading", { name: "Context actions" });
+
+    expect(heading.className).toBe("message-detail-title");
+
+    const senderName = screen.getByText("Sender");
+
+    expect(senderName.className).toBe("message-detail-from-name");
+
+    const identity = senderName.closest(".message-detail-identity");
+
+    expect(identity).not.toBeNull();
+    expect(identity?.querySelector(".message-detail-meta")).not.toBeNull();
+
+    const date = identity?.querySelector(".message-detail-date");
+
+    expect(date?.textContent).toContain("2023");
+  });
+
   it("offers contact actions for the sender and each visible recipient", () => {
     render(<MessageDetail messageId="message-1" onBack={vi.fn()} />);
 
@@ -194,6 +230,18 @@ describe("MessageDetail selected-text context actions", () => {
       "destination@example.com",
       "cc@example.com",
     ]);
+  });
+
+  it("collapses bulk recipient lists behind a more toggle", () => {
+    render(<MessageDetail messageId="message-bulk" onBack={vi.fn()} />);
+
+    expect(screen.getAllByTestId("contact-address-action")).toHaveLength(4);
+    expect(screen.getByRole("button", { name: "+7 more" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "+7 more" }));
+
+    expect(screen.getAllByTestId("contact-address-action")).toHaveLength(11);
+    expect(screen.getByRole("button", { name: "Show less" })).toBeTruthy();
   });
 
   it("does not carry a sender trust override to the next message", async () => {

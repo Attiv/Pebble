@@ -18,6 +18,11 @@
   --color-scrollbar-track: transparent;
   --color-scrollbar-thumb: rgba(26, 26, 26, 0.22);
   --color-scrollbar-thumb-hover: rgba(26, 26, 26, 0.38);
+  --color-email-link: #1d4ed8;
+  --email-content-display: block;
+  --email-content-color: inherit;
+  --email-content-bg: transparent;
+  --email-content-color-scheme: light;
 }
 
 [data-theme="dark"] {
@@ -37,6 +42,10 @@
   --color-scrollbar-track: transparent;
   --color-scrollbar-thumb: rgba(255, 255, 255, 0.22);
   --color-scrollbar-thumb-hover: rgba(255, 255, 255, 0.38);
+  /* Preserve light-authored email colors on every webview, including WebKit. */
+  --email-content-display: inline-block;
+  --email-content-color: #202124;
+  --email-content-bg: #fff;
 }
 
 html, body, #root {
@@ -655,20 +664,18 @@ option {
   min-width: 0;
 }
 
-.message-detail-recipients {
-  font-size: var(--msg-meta-size, 12px);
+/* Participant chips sit in a themed header, so they follow the template's own
+   palette instead of the app's — a fixed dark skin would otherwise print the
+   app's dark secondary text on its own dark card. */
+.message-detail-identity .participant-row,
+.message-detail-identity .participant-toggle {
   color: var(--msg-meta-color, var(--color-text-secondary));
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.message-detail-contacts {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 3px;
-  justify-content: var(--msg-header-align, start);
+.message-detail-identity .participant-chip {
+  color: var(--msg-title-color, var(--color-text-primary));
+  border-color: var(--msg-divider-color, var(--color-border));
+  background: transparent;
 }
 
 .message-detail-date {
@@ -761,10 +768,6 @@ option {
   text-align: start;
 }
 
-.message-detail-aside .message-detail-contacts {
-  justify-content: flex-start;
-}
-
 /* The sidebar is narrow on purpose: the address goes on its own line and meta
    lines wrap instead of truncating. */
 .message-detail-aside .message-detail-from-address {
@@ -796,10 +799,9 @@ option {
   letter-spacing: 0.05em;
 }
 
-.message-detail-aside .message-detail-recipients {
-  white-space: normal;
-  overflow: visible;
-  text-overflow: clip;
+/* In the narrow sidebar the chip row wraps rather than truncating. */
+.message-detail-aside .message-detail-identity .participant-row {
+  flex-wrap: wrap;
 }
 
 /* ─── Attachments ────────────────────────────────────────── */
@@ -954,36 +956,7 @@ option {
 .attachment-list-items {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-}
-
-.attachment-list-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: var(--color-bg-hover);
-  font-size: var(--msg-meta-size, 13px);
-}
-
-.attachment-list-icon {
-  color: var(--msg-meta-color, var(--color-text-secondary));
-}
-
-.attachment-list-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--msg-title-color, var(--color-text-primary));
-}
-
-.attachment-list-size {
-  flex-shrink: 0;
-  font-size: 11px;
-  color: var(--msg-meta-color, var(--color-text-secondary));
+  gap: 6px;
 }
 
 .attachment-list-progress {
@@ -991,21 +964,6 @@ option {
   text-align: right;
   font-size: 10px;
   color: var(--msg-accent, var(--color-accent));
-}
-
-.attachment-list-download {
-  display: flex;
-  align-items: center;
-  padding: 2px;
-  border: none;
-  border-radius: 4px;
-  background: none;
-  cursor: pointer;
-  color: var(--msg-meta-color, var(--color-text-secondary));
-}
-
-.attachment-list-download:disabled {
-  cursor: default;
 }
 
 .message-list-row,
@@ -2479,6 +2437,165 @@ textarea:focus-visible {
 .contact-address-action:disabled {
   cursor: default;
   opacity: 0.42;
+}
+
+.message-participants {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 3px 0;
+}
+
+.message-participants-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+/* Caps the expanded recipient list so large bulk lists scroll in place
+   instead of stretching the message pane past the viewport. The collapse
+   toggle lives outside this container so it always stays reachable. */
+.message-participants-groups--scroll {
+  max-height: 160px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 6px;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar-thumb) transparent;
+}
+
+.message-participants-groups--scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.message-participants-groups--scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background-color: var(--color-scrollbar-thumb);
+}
+
+.message-participants-groups--scroll::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-scrollbar-thumb-hover);
+}
+
+.participant-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.participant-label {
+  flex-shrink: 0;
+}
+
+.participant-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 280px;
+  padding: 1px 3px 1px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-bg);
+}
+
+.participant-chip .participant-name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-primary);
+}
+
+.participant-chip .contact-address-action {
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+}
+
+.participant-chip .contact-address-action:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--color-bg-hover);
+  color: var(--color-accent);
+}
+
+.participant-toggle {
+  padding: 0 2px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
+.participant-toggle:hover {
+  text-decoration: underline;
+}
+
+.attachment-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+}
+
+.attachment-card:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
+  background: var(--color-bg-hover);
+}
+
+.attachment-icon-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.attachment-name {
+  font-size: 13px;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-meta {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.attachment-download {
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.attachment-download:hover:not(:disabled) {
+  background: var(--color-bg);
+  color: var(--color-accent);
+}
+
+.attachment-download:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 .contact-primary-button,

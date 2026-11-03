@@ -29,7 +29,6 @@ function formatDate(timestamp: number): string {
 function ThreadItem({ thread, isSelected, onClick, accountBadge }: Props) {
   const { t } = useTranslation();
   const hasUnread = thread.unread_count > 0;
-  const fontWeight = hasUnread ? "600" : "normal";
   const participantText = thread.participants.slice(0, 3).join(", ") +
     (thread.participants.length > 3 ? ` +${thread.participants.length - 3}` : "");
 
@@ -44,7 +43,6 @@ function ThreadItem({ thread, isSelected, onClick, accountBadge }: Props) {
       style={{
         position: "relative",
         color: "var(--color-text-primary)",
-        fontWeight,
         cursor: "pointer",
         padding: "10px 14px",
         borderBottom: "1px solid var(--color-border)",
@@ -79,6 +77,7 @@ function ThreadItem({ thread, isSelected, onClick, accountBadge }: Props) {
             alignItems: "center",
             gap: "6px",
             fontSize: "13px",
+            fontWeight: "600",
             overflow: "hidden",
             whiteSpace: "nowrap",
             flex: 1,
@@ -107,7 +106,7 @@ function ThreadItem({ thread, isSelected, onClick, accountBadge }: Props) {
           </span>
         </div>
       </div>
-      <div style={{ fontSize: "12.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: "2px" }}>
+      <div style={{ fontSize: "12.5px", fontWeight: hasUnread ? "600" : "400", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: "2px" }}>
         {thread.subject || t("inbox.noSubject")}
       </div>
       <div style={{ fontSize: "12px", color: "var(--color-text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: "normal" }}>

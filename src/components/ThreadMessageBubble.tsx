@@ -11,7 +11,7 @@ import { useForwardCardLabels } from "@/hooks/useForwardCardLabels";
 import { ShadowDomEmail, type MessageLinkContextMenuRequest } from "./ShadowDomEmail";
 import LinkActionPopover from "./LinkActionPopover";
 import ContactAddressAction from "./ContactAddressAction";
-import { uniqueContactParticipants } from "./contact-participants";
+import MessageParticipants from "./MessageParticipants";
 
 interface Props {
   message: Message;
@@ -34,11 +34,10 @@ export default function ThreadMessageBubble({ message, defaultExpanded = false }
   // its links need the same way out.
   const [showLinkActions, setShowLinkActions] = useState<{ href: string; position: { x: number; y: number } } | null>(null);
   const linkActionsRef = useRef<HTMLDivElement>(null);
-  const contactParticipants = uniqueContactParticipants(
-    { name: message.from_name, address: message.from_address },
-    message.to_list,
-    message.cc_list,
-  );
+  const contactParticipantsGroups = [
+    { label: t("thread.to", "To:"), participants: message.to_list ?? [] },
+    { label: t("thread.cc", "Cc:"), participants: message.cc_list ?? [] },
+  ];
 
   useEffect(() => {
     if (expanded && !rendered) {
@@ -89,10 +88,10 @@ export default function ThreadMessageBubble({ message, defaultExpanded = false }
         }}
       >
         {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        <span style={{ fontSize: "13px", fontWeight: 500, flex: 1 }}>
+        <span style={{ fontSize: "13px", fontWeight: "600", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {message.from_name || message.from_address}
         </span>
-        <span style={{ fontSize: "11px", color: "var(--color-text-secondary)" }}>
+        <span style={{ fontSize: "12px", color: "var(--color-text-secondary)", flexShrink: 0 }}>
           {formatFullDate(message.date)}
         </span>
       </button>
@@ -100,29 +99,41 @@ export default function ThreadMessageBubble({ message, defaultExpanded = false }
       {/* Body - only when expanded */}
       {expanded && (
         <div style={{ padding: "12px 14px", borderTop: "1px solid var(--color-border)" }}>
-          {/* To/Cc line */}
-          <div style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginBottom: "8px" }}>
-            <div>
-              {t("thread.to")} {message.to_list?.map((r: { address: string }) => r.address).join(", ")}
-            </div>
-            {message.cc_list?.length > 0 && (
-              <div>
-                {t("thread.cc", "Cc:")} {message.cc_list.map((r: { address: string }) => r.address).join(", ")}
-              </div>
-            )}
+          {/* Sender + participants header card */}
+          <div
+            style={{
+              backgroundColor: "var(--color-bg-hover)",
+              borderRadius: "8px",
+              padding: "8px 12px",
+              color: "var(--color-text-primary)",
+              marginBottom: "8px",
+            }}
+          >
             <div
-              aria-label={t("contacts.participantActions", "Contact actions")}
-              style={{ display: "flex", alignItems: "center", gap: "3px", marginTop: "5px" }}
+              style={{
+                fontSize: "13px",
+                marginBottom: "2px",
+                display: "flex",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: "4px",
+              }}
             >
-              {contactParticipants.map((participant) => (
-                <ContactAddressAction
-                  key={participant.address.toLowerCase()}
-                  accountId={message.account_id}
-                  name={participant.name}
-                  address={participant.address}
-                />
-              ))}
+              <span style={{ fontWeight: "600" }}>
+                {message.from_name || message.from_address}
+              </span>
+              {message.from_name && (
+                <span style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginLeft: "2px" }}>
+                  &lt;{message.from_address}&gt;
+                </span>
+              )}
+              <ContactAddressAction
+                accountId={message.account_id}
+                name={message.from_name}
+                address={message.from_address}
+              />
             </div>
+            <MessageParticipants accountId={message.account_id} groups={contactParticipantsGroups} />
           </div>
           {/* Body content */}
           {rendered?.html ? (
